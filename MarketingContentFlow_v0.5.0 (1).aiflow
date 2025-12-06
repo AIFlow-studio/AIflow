@@ -1,0 +1,143 @@
+{
+  "metadata": {
+    "name": "MarketingContentFlow",
+    "version": "0.5.0",
+    "description": "Generates blog posts and social media snippets from topic ideas.",
+    "creator": "Sarah Jones"
+  },
+  "flow": {
+    "schema_version": "1.0",
+    "entry_agent": "agent_strategist",
+    "agents": [
+      "agent_strategist",
+      "agent_writer",
+      "agent_social",
+      "tool_1764934348645_wo96v"
+    ],
+    "variables": {
+      "tone": "professional"
+    },
+    "logic": [
+      {
+        "id": "link1",
+        "from": "agent_strategist",
+        "to": "agent_writer",
+        "condition": "approved == true",
+        "description": "Proceed to writing if strategy approved"
+      },
+      {
+        "id": "link2",
+        "from": "agent_writer",
+        "to": "agent_social",
+        "condition": "always",
+        "description": "Generate social media posts after article"
+      },
+      {
+        "id": "link_1764934485128_xc6mv0ozn",
+        "from": "agent_social",
+        "to": "tool_1764934348645_wo96v",
+        "condition": "always",
+        "description": "Auto-generated link"
+      }
+    ],
+    "error_handling": {
+      "retry": 1,
+      "fallback_agent": "agent_strategist"
+    }
+  },
+  "agents": [
+    {
+      "id": "agent_strategist",
+      "name": "ContentStrategist",
+      "role": "Planner",
+      "model": {
+        "provider": "openai",
+        "name": "gpt-4-turbo",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      },
+      "prompt": "strategy_prompt.txt",
+      "instructions": "strategy_guide.md",
+      "tools": [
+        "trend_analysis"
+      ],
+      "memory": "memory/market_data.json",
+      "output_format": "json",
+      "executionStatus": "idle"
+    },
+    {
+      "id": "agent_writer",
+      "name": "BlogWriter",
+      "role": "Writer",
+      "model": {
+        "provider": "anthropic",
+        "name": "claude-3-opus",
+        "temperature": 0.8,
+        "max_tokens": 3000
+      },
+      "prompt": "writer_prompt.txt",
+      "instructions": "style_guide.md",
+      "tools": [],
+      "memory": "memory/brand_voice.json",
+      "output_format": "markdown",
+      "executionStatus": "idle"
+    },
+    {
+      "id": "agent_social",
+      "name": "SocialMediaManager",
+      "role": "Marketer",
+      "model": {
+        "provider": "google",
+        "name": "gemini-2.5-flash",
+        "temperature": 0.9,
+        "max_tokens": 500
+      },
+      "prompt": "social_prompt.txt",
+      "instructions": "platform_rules.md",
+      "tools": [],
+      "memory": "",
+      "output_format": "json",
+      "executionStatus": "idle"
+    },
+    {
+      "id": "tool_1764934348645_wo96v",
+      "name": "web_search",
+      "role": "Tool",
+      "model": {
+        "provider": "system",
+        "name": "tool-executor",
+        "temperature": 0,
+        "max_tokens": 0
+      },
+      "prompt": "",
+      "instructions": "",
+      "tools": [
+        "web_search"
+      ],
+      "memory": "",
+      "output_format": "raw",
+      "executionStatus": "idle"
+    }
+  ],
+  "tools": {
+    "trend_analysis": {
+      "type": "http",
+      "endpoint": "https://api.trends.com/v1",
+      "method": "GET",
+      "description": "Analyze current market trends."
+    },
+    "web_search": {
+      "type": "http",
+      "description": "weather",
+      "endpoint": "",
+      "method": "GET",
+      "input_schema": {},
+      "output_schema": {}
+    }
+  },
+  "prompts": {
+    "strategy_prompt.txt": "Outline a content strategy for the given topic.",
+    "writer_prompt.txt": "Write a comprehensive blog post based on the strategy.",
+    "social_prompt.txt": "Create 3 tweets and 1 LinkedIn post for the blog article."
+  }
+}

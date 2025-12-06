@@ -1,3 +1,6 @@
+console.log("API KEY AT BUILD:", process.env.API_KEY);
+
+
 import { GoogleGenAI } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });

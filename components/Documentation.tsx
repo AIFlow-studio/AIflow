@@ -185,7 +185,11 @@ const Documentation: React.FC = () => {
                 </div>
                 <div className="border border-slate-200 p-4 rounded-lg">
                     <strong className="block text-indigo-700 mb-2">The Sequential Chain</strong>
-                    <p className="text-slate-500 text-xs">Linear execution where Agent A's output is Agent B's input. Used in Content Generation (Plan -> Write -> Edit).</p>
+                    <p className="text-slate-500 text-xs">Linear execution where Agent A's output is Agent B's input.<p className="text-slate-500 text-xs">
+  Linear execution where Agent A's output is Agent B's input. 
+  Used in Content Generation (Plan → Write → Edit).
+</p>
+</p>
                 </div>
                 <div className="border border-slate-200 p-4 rounded-lg">
                     <strong className="block text-indigo-700 mb-2">The Supervisor</strong>

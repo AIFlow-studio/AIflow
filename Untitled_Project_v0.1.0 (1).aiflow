@@ -1,0 +1,69 @@
+{
+  "metadata": {
+    "name": "Untitled Project",
+    "version": "0.1.0",
+    "description": "Multi-agent workflow for automated level 1 customer support.",
+    "creator": "Marcel Spaan"
+  },
+  "flow": {
+    "schema_version": "1.0",
+    "entry_agent": "agent1",
+    "agents": [
+      "tool_1764936972656_vnr6g",
+      "agent_1764936973165_6dg6j"
+    ],
+    "variables": {
+      "language": "nl",
+      "timezone": "Europe/Amsterdam"
+    },
+    "logic": [],
+    "error_handling": {
+      "retry": 2,
+      "fallback_agent": "agent3"
+    }
+  },
+  "agents": [
+    {
+      "id": "tool_1764936972656_vnr6g",
+      "name": "New Tool",
+      "role": "Tool",
+      "model": {
+        "provider": "system",
+        "name": "tool-executor",
+        "temperature": 0,
+        "max_tokens": 0
+      },
+      "prompt": "",
+      "instructions": "",
+      "tools": [
+        "web_search"
+      ],
+      "memory": "",
+      "output_format": "raw",
+      "executionStatus": "idle"
+    },
+    {
+      "id": "agent_1764936973165_6dg6j",
+      "name": "New Agent",
+      "role": "Worker",
+      "model": {
+        "provider": "openai",
+        "name": "gpt-4-turbo",
+        "temperature": 0.7,
+        "max_tokens": 1000
+      },
+      "prompt": "new_prompt.txt",
+      "instructions": "instructions.md",
+      "tools": [],
+      "memory": "memory/schema.json",
+      "output_format": "json",
+      "executionStatus": "idle"
+    }
+  ],
+  "tools": {},
+  "prompts": {
+    "system_triage.txt": "You are a classifier. Analyze the incoming ticket and output JSON with 'ticket_type' (technical|billing|general).",
+    "system_tech.txt": "You are a senior support engineer. Use tools to find solutions to the technical problem described.",
+    "system_responder.txt": "You are a polite customer service agent. Draft a friendly email based on the provided solution."
+  }
+}
