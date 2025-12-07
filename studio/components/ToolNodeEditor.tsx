@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Agent, ToolDefinition, ToolRegistry, ToolAuth } from '../types';
+import { Agent, ToolDefinition, ToolRegistry, ToolAuth } from '../../core/types';
 import { Save, Globe, Calculator, Code, Trash2, Key, Braces, List, AlertCircle, ShieldCheck, Wand2, Info, Plus } from 'lucide-react';
 
 interface ToolNodeEditorProps {

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { AIFlowProject } from '../types';
+import { AIFlowProject } from '../../core/types';
 import { Activity, Zap, Clock, DollarSign, ArrowUpRight, Folder, Plus, FileText, Calendar } from 'lucide-react';
 
 interface DashboardProps {

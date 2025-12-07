@@ -7,9 +7,11 @@ import AgentEditor from './components/AgentEditor';
 import ToolNodeEditor from './components/ToolNodeEditor';
 import ConsolePanel from './components/ConsolePanel';
 import Documentation from './components/Documentation';
-import { WorkflowRunner, LogEntry } from './services/WorkflowRunner';
-import { ViewState, AIFlowProject, Agent, ToolDefinition } from './types';
-import { INITIAL_PROJECT, MARKETING_PROJECT, TOOL_TEMPLATES } from './constants';
+
+import { WorkflowRunner, LogEntry } from '../runtime/browser/WorkflowRunner';
+import { ViewState, AIFlowProject, Agent, ToolDefinition } from '../core/types';
+import { INITIAL_PROJECT, MARKETING_PROJECT, TOOL_TEMPLATES } from '../core/constants';
+
 import { 
   Play, Save, Plus, Wrench, Undo, Redo, Box, Database, Zap, 
   FileText, Trash2, Globe, Calculator, Code, Terminal, Check,

@@ -1,5 +1,5 @@
 
-import { AIFlowProject, Agent } from '../types';
+import { AIFlowProject, Agent } from '../../core/types';
 import { GoogleGenAI } from "@google/genai";
 
 export interface LogEntry {

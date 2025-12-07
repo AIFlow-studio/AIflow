@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GoogleGenAI } from "@google/genai";
-import type { AIFlowProject, Agent } from "../types";
+import type { AIFlowProject, Agent } from "../../core/types";
 
 // Kleine helper om ```json ... ``` naar echte JSON te parsen
 function tryParseJson(text: string): any {
@@ -36,7 +36,7 @@ if (!API_KEY) {
 async function run() {
   const fileArg = process.argv[2];
   if (!fileArg) {
-    console.error("Usage: node services/runAiflow.mts <path-to-file.aiflow>");
+    console.error("Usage: node runtime/cli/runAiflow.mts <path-to-file.aiflow>");
     process.exit(1);
   }
 

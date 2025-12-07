@@ -1,7 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3Base from 'd3';
-import { AIFlowProject } from '../types';
+import { AIFlowProject } from '../../core/types';
 
 const d3 = d3Base as any;
 

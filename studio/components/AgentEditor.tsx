@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Agent } from '../types';
+import { Agent } from '../../core/types';
 import { Save, Sparkles, Plus, X } from 'lucide-react';
 import { generateAgentConfig } from '../services/geminiService';
 

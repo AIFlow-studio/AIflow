@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { LayoutDashboard, Network, Users, Terminal, Wrench, Settings, Box, BookOpen, HardDrive } from 'lucide-react';
-import { ViewState, AIFlowProject } from '../types';
+import { ViewState, AIFlowProject } from '../../core/types';
 
 interface SidebarProps {
   currentView: ViewState;

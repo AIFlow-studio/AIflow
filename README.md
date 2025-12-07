@@ -178,9 +178,38 @@ AIflow/
 
 Future structure:
 
-/studio
-/runtime
-/spec
+## 🧱 Project Structure
+
+AIFLOW is opgesplitst in duidelijke modules zodat ontwikkeling, onderhoud en uitbreidingen overzichtelijk blijven.
+
+```text
+AIflow/
+├── studio/                 # React frontend (AIFLOW Studio)
+│   ├── App.tsx
+│   ├── components/         # Sidebar, Dashboard, WorkflowGraph, Editors, Console, Docs
+│   └── services/           # Studio-side helper modules (e.g. geminiService)
+│
+├── core/                   # Shared logic & type definitions
+│   ├── types.ts            # AIFLOW types (agents, flows, transitions, etc.)
+│   └── constants.ts        # Default projects, templates, presets
+│
+├── runtime/
+│   ├── browser/            # In-browser workflow runner (used by Studio)
+│   │   └── WorkflowRunner.ts
+│   └── cli/                # Node CLI runtime
+│       └── runAiflow.mts   # Executes .aiflow files from terminal
+│
+├── docs/                   # Screenshots, diagrams, documentation assets
+│   └── screenshots/
+│
+├── spec/                   # (Coming soon) AIFLOW Standard v0.1
+│
+├── index.tsx               # React bootstrap
+├── index.html              # Vite entry file
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
+
 
 🛣️ Roadmap
 v0.2
