@@ -3,12 +3,12 @@
 
   <div>
 
-  ![Status](https://img.shields.io/badge/status-active-brightgreen)
-  ![License](https://img.shields.io/badge/license-MIT-blue)
-  ![Node](https://img.shields.io/badge/node-22.x-43853d?logo=node.js&logoColor=white)
-  ![Vite](https://img.shields.io/badge/vite-6.x-646CFF?logo=vite&logoColor=white)
-  ![Gemini](https://img.shields.io/badge/Gemini-supported-4A90E2?logo=google)
-  ![AIFLOW](https://img.shields.io/badge/AIFLOW-open%20standard-black)
+  <img alt="Status" src="https://img.shields.io/badge/status-active-brightgreen">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="Node" src="https://img.shields.io/badge/node-22.x-43853d?logo=node.js&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/vite-6.x-646CFF?logo=vite&logoColor=white">
+  <img alt="Gemini" src="https://img.shields.io/badge/Gemini-supported-4A90E2?logo=google">
+  <img alt="AIFLOW" src="https://img.shields.io/badge/AIFLOW-open%20standard-black">
 
   </div>
 
@@ -25,229 +25,206 @@ cd AIflow
 
 npm install
 npm run dev
+```
 
+Open in browser:
 
+```text
 http://localhost:3000
+```
 
+Run a `.aiflow` workflow via CLI:
+
+```bash
 export API_KEY=YOUR_GEMINI_API_KEY
 npm run run-flow -- ./example.aiflow
+```
 
+---
 
-🖼️ Screenshots
+## 🖼️ Screenshots
 
-⚠️ Replace these placeholder images once you upload your screenshots to
-docs/screenshots/.
-
-Workflow Builder
+### Workflow Builder
 <img src="docs/screenshots/mockup_agents_safari.svg" width="800"/>
-Agent Editor
+
+### Agent Editor
 <img src="docs/screenshots/mockup_dashboard_safari.svg" width="800"/>
-Execution Console
+
+### Execution Console
 <img src="docs/screenshots/mockup_workflow_console_macbook.svg" width="800"/>
-Exporting .aiflow
+
+### Exporting `.aiflow`
 <img src="docs/screenshots/mockup_workflow_macbook.svg" width="800"/>
-🚀 What is AIFLOW?
 
-AIFLOW is a universal format for defining, sharing, and executing multi-agent AI workflows (.aiflow files).
-It separates the logic of your workflow from the runtime, so the same .aiflow project can be executed in different environments (browser, CLI, server).
+---
 
-This repository contains:
+## 🚀 What is AIFLOW?
 
-AIFLOW Studio – a visual IDE to design workflows, configure agents, prompts, tools & memory.
+AIFLOW is a universal standard for defining, sharing and executing **multi-agent AI workflows**.
 
-AIFLOW Runtime (CLI) – a Node-based runner that can execute .aiflow projects end-to-end.
+It separates:
 
-🧩 Core Concepts
+- **Workflow design** (AIFLOW Studio)  
+- **Workflow execution** (AIFLOW Runtime)  
+- **Workflow definition** (`.aiflow` specification)
 
-An AIFLOW project includes:
+---
 
-metadata
+## 🧩 Core Concepts
 
-flow – agents, transitions, variables, logic rules
+Every AIFLOW project contains:
 
-agents
+- `metadata`
+- `flow` (agents, transitions, routing logic)
+- `agents` (roles, prompts, models, config)
+- `tools` (future extension)
+- `memory` (future extension)
 
-tools
+---
 
-prompts
+## 🧪 Running AIFLOW Studio (Browser Runtime)
 
-Example Customer Support Flow:
+### 1. Install dependencies
 
-TriageBot – classifier → returns ticket_type
-
-TechSolver – engineer → returns status, message, next_action
-
-Responder – copywriter → produces final customer email
-
-🧪 Running the Studio (Browser Runtime)
-1. Install dependencies
+```bash
 npm install
+```
 
-2. Configure environment
+### 2. Create `.env.local`
 
-Create .env.local:
-
+```ini
 GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+```
 
-3. Start dev server
+### 3. Start the dev server
+
+```bash
 npm run dev
+```
 
+### 4. Set global API key  
 
-You now have access to:
+Go to **Settings → Global API Key**
 
-Workflow Builder
+### 5. Run workflow  
 
-Agents / Prompts / Tools editors
+Press **Run** in the UI.
 
-Execution console
+---
 
-AIFLOW documentation viewer
+## 🖥️ Running `.aiflow` via CLI
 
-4. Set Global API Key in the UI
+Runtime entrypoint:
 
-Under Settings → Global API Key.
+```text
+runtime/cli/runAiflow.mts
+```
 
-5. Run a flow
+Execute any `.aiflow` project:
 
-Click Run and watch each agent execute based on flow.logic.
+```bash
+export API_KEY=YOUR_GEMINI_API_KEY
+npm run run-flow -- ./myflow.aiflow
+```
 
-🖥️ Running .aiflow via CLI
+---
 
-The runtime is located at:
-
-services/runAiflow.mts
-
-
-Export a .aiflow project from the Studio
-
-Set your API key
-
-Run:
-
-npm run run-flow -- ./example.aiflow
-
-
-The CLI runtime will:
-
-Load the .aiflow
-
-Execute agents sequentially
-
-Build prompts
-
-Call Gemini
-
-Parse JSON output (via tryParseJson)
-
-Populate the final context
-
-🧠 JSON Post-Processing
+## 🧠 JSON Post-Processing
 
 The runtime:
 
-strips ```json fences
+- strips code fences  
+- parses JSON output  
+- injects parsed fields into workflow context  
 
-parses JSON objects
+Example:
 
-stores them as:
-
-"output_agent1": {
-  "ticket_type": "general"
+```json
+"context": {
+  "output_agent1": {
+    "ticket_type": "general"
+  }
 }
+```
 
+Used for routing:
 
-This enables conditional logic like:
+```json
+"if": "output_agent1.ticket_type == 'billing'"
+```
 
-if (context.output_agent1.ticket_type === "billing") …
-
-🧱 Project Structure
-AIflow/
-├── App.tsx
-├── components/
-├── services/
-│   ├── WorkflowRunner.ts
-│   └── runAiflow.mts
-├── types.ts
-├── constants.ts
-├── metadata.json
-├── index.tsx
-├── index.html
-├── vite.config.ts
-└── README.md
-
-
-Future structure:
+---
 
 ## 🧱 Project Structure
 
-AIFLOW is opgesplitst in duidelijke modules zodat ontwikkeling, onderhoud en uitbreidingen overzichtelijk blijven.
-
 ```text
 AIflow/
-├── studio/                 # React frontend (AIFLOW Studio)
+├── studio/                 # React frontend
 │   ├── App.tsx
-│   ├── components/         # Sidebar, Dashboard, WorkflowGraph, Editors, Console, Docs
-│   └── services/           # Studio-side helper modules (e.g. geminiService)
+│   ├── components/
+│   └── services/
 │
-├── core/                   # Shared logic & type definitions
-│   ├── types.ts            # AIFLOW types (agents, flows, transitions, etc.)
-│   └── constants.ts        # Default projects, templates, presets
+├── core/                   # Shared logic & types
+│   ├── types.ts
+│   └── constants.ts
 │
 ├── runtime/
-│   ├── browser/            # In-browser workflow runner (used by Studio)
+│   ├── browser/            # Browser runtime
 │   │   └── WorkflowRunner.ts
-│   └── cli/                # Node CLI runtime
-│       └── runAiflow.mts   # Executes .aiflow files from terminal
+│   └── cli/                # CLI runtime
+│       └── runAiflow.mts
 │
-├── docs/                   # Screenshots, diagrams, documentation assets
+├── docs/
 │   └── screenshots/
 │
-├── spec/                   # (Coming soon) AIFLOW Standard v0.1
+├── spec/
+│   └── aiflow-v0.1.md
 │
-├── index.tsx               # React bootstrap
-├── index.html              # Vite entry file
+├── index.tsx
+├── index.html
+├── vite.config.ts
 ├── package.json
-├── tsconfig.json
-└── vite.config.ts
+└── tsconfig.json
+```
 
+---
 
-🛣️ Roadmap
-v0.2
+## 🛣️ Roadmap
 
-Conditional flow logic
+### v0.2  
 
-JSON-based routing
+- Conditional logic engine  
+- Expression evaluator  
 
-v0.3
+### v0.3  
 
-Tooling standard
+- Tooling standard  
+- Built-in tools  
 
-HTTP + Builtin tools
+### v0.4  
 
-v0.4
+- Shared runtime  
+- Python runtime  
 
-Shared runtime core
+### v1.0  
 
-Python runtime
+- Full `.aiflow` spec  
+- Validation system  
 
-v1.0
+---
 
-Full .aiflow container spec
+## 🤝 Contributing
 
-Validation library
-
-Security & trust model
-
-🤝 Contributing
+```bash
 git checkout -b feat/my-feature
 npm run dev
-npm run run-flow -- example.aiflow
+npm run run-flow -- ./example.aiflow
 git commit -am "Add feature"
 git push
+```
 
+---
 
-Then open a PR.
+## 📜 License
 
-📜 License
-
-MIT (recommended).
+MIT
