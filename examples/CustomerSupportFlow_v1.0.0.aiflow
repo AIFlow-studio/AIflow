@@ -2,96 +2,46 @@
   "metadata": {
     "name": "CustomerSupportFlow",
     "version": "1.0.0",
-    "description": "Multi-agent workflow voor geautomatiseerde level 1 klantenondersteuning.",
-    "created": "2025-12-02T20:15:00Z",
-    "modified": "2025-12-02T20:15:00Z"
+    "description": "Multi-agent flow for triaging and responding to customer support tickets."
   },
   "flow": {
     "start": "agent1",
-    "logic": {
-      "agent1": [
-        {
-          "if": "output.ticket_type == 'technical'",
-          "then": "agent2",
-          "description": "Routeer technische tickets naar de engineer."
-        },
-        {
-          "if": "output.ticket_type == 'billing'",
-          "then": "agent3",
-          "description": "Routeer factuurvragen direct naar de responder."
-        },
-        {
-          "if": "output.ticket_type == 'general'",
-          "then": "agent3",
-          "description": "Algemene vragen direct naar de responder."
-        }
-      ],
-      "agent2": [
-        {
-          "if": "output.solution_found == true",
-          "then": "agent3",
-          "description": "Als er een oplossing is gevonden, laat de responder een mail opstellen."
-        }
-      ]
-    }
+    "variables": {
+      "ticket_text": "My wifi is broken and the router keeps restarting."
+    },
+    "logic": [
+      {
+        "id": "route_network",
+        "from": "agent1",
+        "to": "agent2",
+        "condition": "contains(classification, 'Network')"
+      }
+    ]
   },
   "agents": {
     "agent1": {
+      "id": "agent1",
       "name": "TriageBot",
       "role": "Classifier",
-      "provider": "openai",
-      "model": "gpt-4.2-mini",
-      "prompt": "system_triage.txt",
-      "config": {
-        "temperature": 0.1,
-        "max_tokens": 500
-      },
+      "description": "Classifies the incoming ticket and decides what type of issue it is.",
+      "prompt": "triage_prompt",
       "output_format": "json",
-      "description": "Classificeert binnenkomende tickets in technical / billing / general."
+      "provider": "google",
+      "model": "gemini-2.5-flash"
     },
     "agent2": {
-      "name": "TechSolver",
-      "role": "Engineer",
-      "provider": "openai",
-      "model": "gpt-4-turbo",
-      "prompt": "system_tech.txt",
-      "config": {
-        "temperature": 0.4,
-        "max_tokens": 2000
-      },
-      "tools": ["web_search", "stack_overflow_api"],
-      "output_format": "json",
-      "description": "Zoekt technische oorzaken en oplossingen voor L1-incidenten."
-    },
-    "agent3": {
-      "name": "Responder",
-      "role": "Copywriter",
-      "provider": "anthropic",
-      "model": "claude-3-5-sonnet",
-      "prompt": "system_responder.txt",
-      "config": {
-        "temperature": 0.7,
-        "max_tokens": 1000
-      },
+      "id": "agent2",
+      "name": "ResponderBot",
+      "role": "Responder",
+      "description": "Writes a helpful response to the customer based on the classification and ticket details.",
+      "prompt": "responder_prompt",
       "output_format": "text",
-      "description": "Schrijft nette, klantvriendelijke e-mailantwoorden."
+      "provider": "google",
+      "model": "gemini-2.5-flash"
     }
   },
-  "tools": {
-    "web_search": {
-      "type": "http",
-      "endpoint": "https://api.search.com/v1",
-      "method": "GET",
-      "description": "Zoek documentatie op het web."
-    },
-    "stack_overflow_api": {
-      "type": "http",
-      "endpoint": "https://api.stackoverflow.com/v1/search",
-      "method": "GET",
-      "description": "Zoek naar bestaande oplossingen in Stack Overflow threads."
-    }
-  },
-  "memory": {
-    "enabled": false
+  "prompts": {
+    "triage_prompt": "You are an AI assistant acting as a customer support triage agent.\n\nYou receive a support ticket from a customer.\nUse the provided context to decide what type of issue this is.\n\nContext:\n- Ticket text: {{ticket_text}}\n\nYour task:\n- Classify the ticket into a short category.\n- Use a single field called `classification`.\n\nOutput format (JSON):\n{\n  \"classification\": \"<short category such as 'Network Issue', 'Billing', 'Account', 'Hardware', 'Other'>\"\n}\n\nRespond ONLY with valid JSON, no extra commentary.",
+    "responder_prompt": "You are an AI assistant acting as a customer support responder.\n\nYou receive a support ticket and a classification from a triage agent.\n\nContext:\n- Ticket text: {{ticket_text}}\n- Classification: {{classification}}\n\nYour task:\n- Write a clear, polite and helpful response to the customer.\n- Explain the likely cause at a high level.\n- Suggest 2–3 concrete troubleshooting steps.\n\nTone:\n- Empathetic, professional, concise.\n\nRespond in plain text, suitable to send as an email reply."
   }
 }

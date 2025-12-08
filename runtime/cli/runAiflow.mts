@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { GoogleGenAI } from "@google/genai";
-import type { AIFlowProject, Agent } from "../../core/types";
+import { validateFlow } from "../core/validateFlow.mts";
+import { evaluateCondition } from "../core/evaluateCondition.mts";
 
 // Kleine helper om ```json ... ``` naar echte JSON te parsen
 export function tryParseJson(text: string): any {
@@ -23,7 +24,6 @@ export function tryParseJson(text: string): any {
   }
 }
 
-
 // Haal API-key uit env (CLI-omgeving)
 const API_KEY = process.env.API_KEY || process.env.GEMINI_API_KEY;
 
@@ -37,43 +37,66 @@ if (!API_KEY) {
 async function run() {
   const fileArg = process.argv[2];
   if (!fileArg) {
-    console.error("Usage: node runtime/cli/runAiflow.mts <path-to-file.aiflow>");
+    console.error(
+      "Usage: node runtime/cli/runAiflow.mts <path-to-file.aiflow>"
+    );
     process.exit(1);
   }
 
   const filePath = resolve(process.cwd(), fileArg);
   const raw = readFileSync(filePath, "utf-8");
-  const project = JSON.parse(raw) as AIFlowProject;
+  const project: any = JSON.parse(raw);
+
+  // ✅ Valideer het ingeladen .aiflow-project voordat we iets uitvoeren
+  const validation = validateFlow(project);
+  if (!validation.ok) {
+    console.error("Invalid AIFLOW file:");
+    for (const err of validation.errors) {
+      console.error(" ›", err);
+    }
+    process.exit(1);
+  }
 
   console.log(
-    `▶ Running AIFLOW project: ${project.metadata.name} v${project.metadata.version}`
+    `▶ Running AIFLOW project: ${project.metadata?.name} v${project.metadata?.version}`
   );
 
   const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-  // Eenvoudige context (je kunt dit later uitbreiden)
+  // Globale context (flow.variables + latere outputs)
   const context: Record<string, any> = {
-    ...(project.flow.variables || {}),
+    ...(project.flow?.variables || {}),
   };
 
-  let currentAgentId: string | null = project.flow.entry_agent;
+  // ✅ Bepaal start-agent: eerst flow.start, dan flow.entry_agent als fallback
+  let currentAgentId: string | null =
+    (project.flow && project.flow.start) ||
+    (project.flow && project.flow.entry_agent) ||
+    null;
+
+  const agents: Record<string, any> = project.agents || {};
+  const logicRules: any[] = Array.isArray(project.flow?.logic)
+    ? project.flow.logic
+    : [];
+
   let steps = 0;
   const MAX_STEPS = 10;
 
   while (currentAgentId && steps < MAX_STEPS) {
-    const agent: Agent | undefined = project.agents.find(
-      (a) => a.id === currentAgentId
-    );
+    const agent = agents[currentAgentId];
 
     if (!agent) {
       console.error(`❌ Agent '${currentAgentId}' not found`);
       break;
     }
 
-    console.log(`\n=== Agent: ${agent.name} (${agent.role}) ===`);
+    console.log(
+      `\n=== Agent: ${agent.name ?? currentAgentId} (${agent.role}) ===`
+    );
 
+    const prompts = project.prompts || {};
     const promptTemplate =
-      project.prompts[agent.prompt] ||
+      prompts[agent.prompt] ||
       `You are an AI agent acting as ${agent.role}. Use the context to decide what to do.`;
 
     const filledPrompt = promptTemplate.replace(/\{\{(\w+)\}\}/g, (_, key) =>
@@ -105,14 +128,27 @@ Respond in ${agent.output_format || "text"}.
     console.log("\nRaw Output:\n" + rawOutput);
     console.log("\nParsed Output:", parsed);
 
-    // Hier slaan we nu ECHTE JSON op in de context (of tekst als parse faalt)
-    context[`output_${agent.id}`] = parsed;
+    // Sla output op in de context onder deze agent-id
+    context[`output_${currentAgentId}`] = parsed;
 
-    // Simpele logic: pak eerste rule waar from == currentAgentId
-    const rules = project.flow.logic.filter(
+    // ✅ Expression-based routing: kies de eerste rule waarvan de condition waar is
+    const rulesForAgent = logicRules.filter(
       (rule) => rule.from === currentAgentId
     );
-    const nextRule = rules[0];
+
+    let nextRule: any | null = null;
+
+    for (const rule of rulesForAgent) {
+      const ok = evaluateCondition(rule.condition, {
+        context,
+        output: parsed,
+        agentId: currentAgentId,
+      });
+      if (ok) {
+        nextRule = rule;
+        break;
+      }
+    }
 
     if (!nextRule) {
       console.log("\n✅ No further transitions, stopping.");
@@ -121,7 +157,9 @@ Respond in ${agent.output_format || "text"}.
     }
 
     console.log(
-      `\n→ Transition: ${currentAgentId} -> ${nextRule.to} (rule: ${nextRule.id})`
+      `\n→ Transition: ${currentAgentId} -> ${nextRule.to} (rule: ${
+        nextRule.id ?? "unnamed"
+      })`
     );
     currentAgentId = nextRule.to;
     steps++;
@@ -131,8 +169,6 @@ Respond in ${agent.output_format || "text"}.
   console.log(JSON.stringify(context, null, 2));
 }
 
-// ... alle imports + functies + run() definitie ...
-
 // Alleen de CLI daadwerkelijk starten als we NIET onder Vitest draaien
 if (!process.env.VITEST) {
   run().catch((err) => {
@@ -140,4 +176,3 @@ if (!process.env.VITEST) {
     process.exit(1);
   });
 }
-
