@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Bug, AlertTriangle, ListTree, ChevronRight, Play, Square } from 'lucide-react';
+import {
+  Bug,
+  AlertTriangle,
+  ListTree,
+  ChevronRight,
+  Play,
+  Square,
+  Search,
+} from 'lucide-react';
 
 type TraceRule = {
   id: string;
@@ -36,10 +44,16 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
   const [error, setError] = useState<string | null>(null);
   const [trace, setTrace] = useState<TraceStep[]>([]);
   const [context, setContext] = useState<Record<string, unknown> | null>(null);
-  const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null);
+  const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(
+    null
+  );
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed] = useState(1200); // ms per stap
+
+  // Filters
+  const [agentFilter, setAgentFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
 
   const handleParse = () => {
     try {
@@ -137,6 +151,29 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
     setIsPlaying((prev) => !prev);
   };
 
+  // Afgeleide trace op basis van filter & zoekterm
+  const normalizedAgentFilter = agentFilter.trim().toLowerCase();
+  const normalizedSearchTerm = searchTerm.trim().toLowerCase();
+
+  const visibleTrace = trace.filter((step) => {
+    // 1) Agent-filter (naam, id of role)
+    const matchesAgent =
+      !normalizedAgentFilter ||
+      step.agentName.toLowerCase().includes(normalizedAgentFilter) ||
+      step.agentId.toLowerCase().includes(normalizedAgentFilter) ||
+      step.role.toLowerCase().includes(normalizedAgentFilter);
+
+    if (!normalizedSearchTerm) {
+      return matchesAgent;
+    }
+
+    // 2) Algemene zoekterm door de hele step (context, output, rules, etc.)
+    const haystack = JSON.stringify(step).toLowerCase();
+    const matchesSearch = haystack.includes(normalizedSearchTerm);
+
+    return matchesAgent && matchesSearch;
+  });
+
   return (
     <div className="p-8 max-w-6xl mx-auto">
       {/* Header */}
@@ -161,9 +198,7 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
         {onJumpToAgent && trace.length > 0 && selectedStepIndex !== null && (
           <button
             type="button"
-            onClick={() =>
-              onJumpToAgent(trace[selectedStepIndex!].agentId)
-            }
+            onClick={() => onJumpToAgent(trace[selectedStepIndex].agentId)}
             className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-800 shadow-sm"
           >
             Open in Workflow Builder
@@ -235,17 +270,41 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
 
       {/* Trace timeline + controls */}
       <div className="mt-6">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-3 gap-3">
           <h2 className="text-sm font-semibold text-slate-800 flex items-center">
             Execution Trace
             {trace.length > 0 && (
               <span className="ml-2 text-xs font-normal text-slate-500">
-                ({trace.length} step{trace.length === 1 ? '' : 's'})
+                ({visibleTrace.length} van {trace.length} steps)
               </span>
             )}
           </h2>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-col md:flex-row md:items-center gap-2">
+            {/* Agent-filter */}
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={agentFilter}
+                onChange={(e) => setAgentFilter(e.target.value)}
+                placeholder="Filter op agent / role / id"
+                className="px-2 py-1 rounded-lg border border-slate-300 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Zoekterm over context + output */}
+            <div className="flex items-center gap-1">
+              <Search className="h-3 w-3 text-slate-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Zoek in context & output"
+                className="px-2 py-1 rounded-lg border border-slate-300 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Play-knop */}
             <button
               type="button"
               onClick={handleTogglePlay}
@@ -273,18 +332,20 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
           </div>
         </div>
 
-        {trace.length > 0 && (
+        {trace.length > 0 && visibleTrace.length > 0 && (
           <div className="mb-5 overflow-x-auto pb-2">
             <div className="flex items-center space-x-2 min-w-max">
-              {trace.map((step, index) => {
-                const isActive = selectedStepIndex === index;
+              {visibleTrace.map((step) => {
+                const originalIndex = trace.indexOf(step);
+                const isActive = selectedStepIndex === originalIndex;
+
                 return (
-                  <React.Fragment key={step.step ?? index}>
+                  <React.Fragment key={step.step ?? originalIndex}>
                     <button
                       type="button"
                       onClick={() => {
                         setIsPlaying(false);
-                        handleSelectStep(index);
+                        handleSelectStep(originalIndex);
                       }}
                       className={`flex flex-col items-center px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
                         isActive
@@ -302,9 +363,6 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
                         {step.role}
                       </span>
                     </button>
-                    {index < trace.length - 1 && (
-                      <div className="hidden md:flex flex-1 h-px bg-slate-200 mx-1" />
-                    )}
                   </React.Fragment>
                 );
               })}
@@ -318,18 +376,24 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
             <span className="font-medium">Parse trace</span> om de stappen te
             zien.
           </div>
+        ) : visibleTrace.length === 0 ? (
+          <div className="border border-dashed border-slate-300 rounded-xl p-6 text-center text-sm text-slate-500 bg-slate-50">
+            Geen stappen gevonden voor deze filter/zoekopdracht. Probeer een
+            andere term of maak de filters leeg.
+          </div>
         ) : (
           <div className="space-y-4">
-            {trace.map((step, index) => {
+            {visibleTrace.map((step) => {
+              const originalIndex = trace.indexOf(step);
               const matchedRule = step.rulesEvaluated?.find(
                 (r) => r.id === step.selectedRuleId
               );
-              const isActive = selectedStepIndex === index;
+              const isActive = selectedStepIndex === originalIndex;
 
               return (
                 <div
                   key={step.step}
-                  id={`trace-step-${index}`}
+                  id={`trace-step-${originalIndex}`}
                   className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all ${
                     isActive ? 'ring-2 ring-indigo-500 ring-offset-1' : ''
                   }`}
