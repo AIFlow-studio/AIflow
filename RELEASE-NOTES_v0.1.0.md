@@ -33,7 +33,8 @@ Run any workflow:
 
 ```bash
 export API_KEY=YOUR_GEMINI_API_KEY
-npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
 ```
 
 ### 📦 `.aiflow` Open Standard (v0.1)
@@ -53,9 +54,9 @@ Key design goals:
 
 The `examples/` directory ships with three ready-to-run projects:
 
-- `CustomerSupportFlow_v1.0.0.aiflow`  
-- `MarketingContentFlow_v0.5.0.aiflow`  
-- `LeadQualificationFlow_v1.0.0.aiflow`  
+- `examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow`  
+- `examples/MarketingContentFlow/MarketingContentFlow_v0.5.0.aiflow`  
+- `examples/LeadQualificationFlow/LeadQualificationFlow_v1.0.0.aiflow`  
 
 Each example demonstrates different agent roles, providers, routing setups and output formats.
 
@@ -93,7 +94,8 @@ Run an example via CLI:
 
 ```bash
 export API_KEY=YOUR_GEMINI_API_KEY
-npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
 ```
 
 ---

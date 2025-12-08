@@ -43,7 +43,7 @@ Samengevat:
   - `cli/` — Node/TS CLI-runtime (`runAiflow.mts`)
   - `browser/` — browser runtime (`WorkflowRunner.ts`)
 - `spec/` — AIFLOW Standard v0.1 (`aiflow-v0.1.md`)
-- `examples/` — voorbeeldprojecten (`*.aiflow`)
+- `examples/` — voorbeeldprojecten (`subfolders per example`)
 - `docs/` — o.a. screenshots voor README & site
 
 De README beschrijft al netjes Quick Start, CLI-run, projectstructuur en roadmap.
@@ -231,7 +231,8 @@ We hebben een volledig nieuwe debugpagina gebouwd:
 
 - Je draait een flow via de CLI:
   ```bash
-  npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+  npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
   ```
 - Aan het eind kopieer je **alleen** het JSON-object na:
   ```
@@ -398,7 +399,8 @@ npm test
 
 # CLI-run (met API key)
 export API_KEY=YOUR_GEMINI_API_KEY
-npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
 ```
 
 ### 10.2 Debug flow

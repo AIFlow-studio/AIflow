@@ -43,7 +43,7 @@ Feedback, bug reports and pull requests are very welcome.
 
    ```bash
    export API_KEY=YOUR_GEMINI_API_KEY
-   npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+   npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
    ```
 
 ---

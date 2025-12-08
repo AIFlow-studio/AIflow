@@ -37,7 +37,8 @@ Run a `.aiflow` workflow via CLI:
 
 ```bash
 export API_KEY=YOUR_GEMINI_API_KEY
-npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
 ```
 
 ---
@@ -132,7 +133,8 @@ Execute any `.aiflow` project:
 
 ```bash
 export API_KEY=YOUR_GEMINI_API_KEY
-npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
 ```
 
 ---
@@ -189,9 +191,15 @@ AIflow/
 │   └── aiflow-v0.1.md
 │
 ├── examples/
-│   ├── CustomerSupportFlow_v1.0.0.aiflow
-│   ├── MarketingContentFlow_v0.5.0.aiflow
-│   └── LeadQualificationFlow_v1.0.0.aiflow
+│   ├── CustomerSupportFlow/
+│   │   ├── CustomerSupportFlow_v1.0.0.aiflow
+│   │   └── README.md
+│   ├── MarketingContentFlow/
+│   │   ├── MarketingContentFlow_v0.5.0.aiflow
+│   │   └── README.md
+│   └── LeadQualificationFlow/
+│       ├── LeadQualificationFlow_v1.0.0.aiflow
+│       └── README.md
 │
 ├── index.tsx
 ├── index.html
@@ -231,7 +239,8 @@ AIflow/
 ```bash
 git checkout -b feat/my-feature
 npm run dev
-npm run run-flow -- ./examples/CustomerSupportFlow_v1.0.0.aiflow
+npm run run-flow -- ./examples/CustomerSupportFlow/CustomerSupportFlow_v1.0.0.aiflow
+
 git commit -am "Add feature"
 git push
 ```
