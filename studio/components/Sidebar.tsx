@@ -8,6 +8,7 @@ import {
   Settings,
   Box,
   HardDrive,
+  Bug,
 } from 'lucide-react';
 import { ViewState, AIFlowProject } from '../../core/types';
 
@@ -33,6 +34,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   const isDocs = currentView === ViewState.DOCS;
+  const isDebug = currentView === ViewState.DEBUG;
 
   return (
     <div className="w-64 bg-white border-r border-slate-200 h-screen flex flex-col fixed left-0 top-0 z-10 shadow-sm">
@@ -80,6 +82,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="mt-8 mb-2 px-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">
           Resources
         </div>
+
         {/* DOCS ITEM MET LOGO */}
         <button
           onClick={() => onViewChange(ViewState.DOCS)}
@@ -101,6 +104,22 @@ const Sidebar: React.FC<SidebarProps> = ({
             />
           </div>
           <span>Documentation</span>
+        </button>
+
+        {/* DEBUG ITEM */}
+        <button
+          onClick={() => onViewChange(ViewState.DEBUG)}
+          className={`mt-1 w-full flex items-center space-x-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
+            isDebug
+              ? 'bg-slate-900 text-slate-50 shadow-sm ring-1 ring-slate-800'
+              : 'text-slate-600 hover:bg-slate-900 hover:text-slate-50'
+          }`}
+        >
+          <Bug
+            size={18}
+            className={isDebug ? 'text-amber-300' : 'text-slate-300'}
+          />
+          <span>Debug (CLI Trace)</span>
         </button>
       </nav>
 

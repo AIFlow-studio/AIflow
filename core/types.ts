@@ -8,7 +8,8 @@ export enum ViewState {
   TOOLS = 'TOOLS',
   SETTINGS = 'SETTINGS',
   DOCS = 'DOCS',
-  MEMORY = 'MEMORY'
+  MEMORY = 'MEMORY',
+  DEBUG = 'DEBUG', // 👈 nieuw
 }
 
 // AIFLOW Standard Types

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
@@ -7,6 +6,7 @@ import AgentEditor from './components/AgentEditor';
 import ToolNodeEditor from './components/ToolNodeEditor';
 import ConsolePanel from './components/ConsolePanel';
 import Documentation from './components/Documentation';
+import DebugTraceView from './components/DebugTraceView';
 
 import { WorkflowRunner, LogEntry } from '../runtime/browser/WorkflowRunner';
 import { ViewState, AIFlowProject, Agent, ToolDefinition } from '../core/types';
@@ -125,6 +125,12 @@ const App: React.FC = () => {
 
   const handleNavigateToTools = () => {
       setCurrentView(ViewState.TOOLS);
+  };
+
+  // Jump from Debug Trace to Workflow Builder on a specific agent
+  const handleJumpToAgentFromTrace = (agentId: string) => {
+    setSelectedAgentId(agentId);
+    setCurrentView(ViewState.WORKFLOW);
   };
 
   // --- Helpers ---
@@ -641,8 +647,20 @@ const App: React.FC = () => {
                         </button>
 
                         <div className="flex items-center bg-white border border-slate-300 rounded-lg mx-2 shadow-sm">
-                            <button onClick={handleUndo} disabled={historyIndex === 0} className={`p-2 border-r border-slate-300 hover:bg-slate-50 ${historyIndex === 0 ? 'text-slate-300' : 'text-slate-600'}`}><Undo size={18} /></button>
-                            <button onClick={handleRedo} disabled={historyIndex === history.length - 1} className={`p-2 hover:bg-slate-50 ${historyIndex === history.length - 1 ? 'text-slate-300' : 'text-slate-600'}`}><Redo size={18} /></button>
+                            <button 
+                              onClick={handleUndo} 
+                              disabled={historyIndex === 0} 
+                              className={`p-2 border-r border-slate-300 hover:bg-slate-50 ${historyIndex === 0 ? 'text-slate-300' : 'text-slate-600'}`}
+                            >
+                              <Undo size={18} />
+                            </button>
+                            <button 
+                              onClick={handleRedo} 
+                              disabled={historyIndex === activeSession.history.length - 1} 
+                              className={`p-2 hover:bg-slate-50 ${historyIndex === activeSession.history.length - 1 ? 'text-slate-300' : 'text-slate-600'}`}
+                            >
+                              <Redo size={18} />
+                            </button>
                         </div>
 
                         <div className="relative group">
@@ -882,6 +900,10 @@ const App: React.FC = () => {
                 )}
             </div>
         );
+      }
+
+      if (currentView === ViewState.DEBUG) {
+        return <DebugTraceView onJumpToAgent={handleJumpToAgentFromTrace} />;
       }
 
       if (currentView === ViewState.DOCS) {
