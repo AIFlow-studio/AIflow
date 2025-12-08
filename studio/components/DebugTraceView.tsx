@@ -1,344 +1,452 @@
-import React, { useState, useEffect } from "react";
-import { Play, Pause, ChevronRight } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import { Bug, AlertTriangle, ListTree, ChevronRight, Play, Square } from 'lucide-react';
 
-interface TraceRule {
+type TraceRule = {
   id: string;
   from: string;
   to: string;
   condition: string;
   result: boolean;
-}
+};
 
-interface TraceStep {
+type TraceStep = {
   step: number;
   agentId: string;
   agentName: string;
   role: string;
-  inputContext: unknown;
+  inputContext: Record<string, unknown>;
   rawOutput: string;
   parsedOutput: unknown;
-  rulesEvaluated: TraceRule[];
-  selectedRuleId: string | null;
-  nextAgentId: string | null;
+  rulesEvaluated?: TraceRule[];
+  selectedRuleId?: string | null;
+  nextAgentId?: string | null;
+};
+
+type TracePayload = {
+  __trace?: TraceStep[];
+  [key: string]: unknown;
+};
+
+interface DebugTraceViewProps {
+  onJumpToAgent?: (agentId: string) => void;
 }
 
-interface DebugTraceViewerProps {
-  onJumpToAgentFromTrace?: (agentId: string) => void;
-}
-
-const DebugTraceViewer: React.FC<DebugTraceViewerProps> = ({
-  onJumpToAgentFromTrace,
-}) => {
-  const [rawJson, setRawJson] = useState("");
-  const [parsedContext, setParsedContext] = useState<Record<string, unknown> | null>(null);
-  const [trace, setTrace] = useState<TraceStep[]>([]);
-  const [selectedStepIndex, setSelectedStepIndex] = useState(0);
+const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
+  const [rawJson, setRawJson] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [trace, setTrace] = useState<TraceStep[]>([]);
+  const [context, setContext] = useState<Record<string, unknown> | null>(null);
+  const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playSpeed] = useState(1200); // ms per stap
 
-  // Parse trace from Final context JSON
   const handleParse = () => {
-    setError(null);
     try {
-      const obj = JSON.parse(rawJson);
+      const trimmed = rawJson.trim();
 
-      if (!obj || typeof obj !== "object") {
-        throw new Error("JSON root moet een object zijn.");
+      if (!trimmed) {
+        setError('Plak eerst de JSON van de CLI-output.');
+        setTrace([]);
+        setContext(null);
+        setSelectedStepIndex(null);
+        setIsPlaying(false);
+        return;
       }
 
-      const { __trace, ...rest } = obj as { __trace?: TraceStep[] };
+      const parsed = JSON.parse(trimmed) as TracePayload;
+      const steps = Array.isArray(parsed.__trace) ? parsed.__trace : [];
 
-      if (!Array.isArray(__trace)) {
-        throw new Error(
-          "Geen geldige '__trace' gevonden in JSON. Zorg dat je het volledige Final context-object uit de CLI plakt."
+      if (!steps.length) {
+        setError(
+          'Geen "__trace" array gevonden in de JSON. Zorg dat je de volledige "Final context" plakt.'
         );
+        setTrace([]);
+        setContext(parsed as Record<string, unknown>);
+        setSelectedStepIndex(null);
+        setIsPlaying(false);
+        return;
       }
 
-      setParsedContext(rest);
-      setTrace(__trace);
+      setError(null);
+      setTrace(steps);
+      setContext(parsed as Record<string, unknown>);
       setSelectedStepIndex(0);
       setIsPlaying(false);
-    } catch (e: unknown) {
-      console.error(e);
+    } catch (e) {
       setError(
-        e instanceof Error
-          ? `Kon JSON niet parsen: ${e.message}`
-          : "Onbekende fout bij het parsen van JSON."
+        'Kon JSON niet parsen. Controleer of je exact de JSON van "Final context" hebt geplakt.'
       );
-      setParsedContext(null);
       setTrace([]);
-      setSelectedStepIndex(0);
+      setContext(null);
+      setSelectedStepIndex(null);
       setIsPlaying(false);
     }
   };
 
-  // Auto-play: loop door de stappen met nette stop aan het einde
-  useEffect(() => {
-    if (!isPlaying) return;
-    if (trace.length === 0) return;
-
-    // Als we al op de laatste stap staan: stop de playback
-    if (selectedStepIndex >= trace.length - 1) {
-      setIsPlaying(false);
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setSelectedStepIndex((prev) =>
-        prev + 1 >= trace.length ? trace.length - 1 : prev + 1
-      );
-    }, 1200);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isPlaying, selectedStepIndex, trace.length]);
-
-  const handlePlayClick = () => {
-    if (trace.length === 0) return;
-
-    // Als hij al speelt → pauzeer
-    if (isPlaying) {
-      setIsPlaying(false);
-      return;
-    }
-
-    // Als we aan het einde staan → opnieuw vanaf 0 beginnen
-    if (selectedStepIndex >= trace.length - 1) {
-      setSelectedStepIndex(0);
-    }
-
-    setIsPlaying(true);
-  };
+  const renderJson = (value: unknown) => JSON.stringify(value, null, 2);
 
   const handleSelectStep = (index: number) => {
     setSelectedStepIndex(index);
-    setIsPlaying(false); // handmatige selectie pauzeert de playback
+    const el = document.getElementById(`trace-step-${index}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
-  const handleOpenInBuilder = () => {
-    const currentStep = trace[selectedStepIndex];
-    if (!currentStep || !currentStep.agentId) return;
-    onJumpToAgentFromTrace?.(currentStep.agentId);
-  };
+  // Auto-play door de stappen
+  useEffect(() => {
+    if (!isPlaying || trace.length === 0) return;
 
-  const selectedStep = trace[selectedStepIndex] ?? null;
+    const interval = setInterval(() => {
+      setSelectedStepIndex((prev) => {
+        if (prev === null) {
+          // begin altijd bij eerste step
+          const nextIndex = 0;
+          const elStart = document.getElementById(`trace-step-${nextIndex}`);
+          if (elStart) {
+            elStart.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+          return nextIndex;
+        }
+
+        const next = prev + 1;
+        if (next >= trace.length) {
+          // einde bereikt → stop play
+          setIsPlaying(false);
+          return prev;
+        }
+
+        const el = document.getElementById(`trace-step-${next}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        return next;
+      });
+    }, playSpeed);
+
+    return () => clearInterval(interval);
+  }, [isPlaying, trace.length, playSpeed]);
+
+  const handleTogglePlay = () => {
+    if (trace.length === 0) return;
+    if (selectedStepIndex === null) {
+      setSelectedStepIndex(0);
+    }
+    setIsPlaying((prev) => !prev);
+  };
 
   return (
-    <div className="p-6 h-screen flex flex-col bg-slate-50">
+    <div className="p-8 max-w-6xl mx-auto">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Debug — CLI Trace Viewer</h1>
-          <p className="text-slate-500 text-sm">
-            Plak hier de <span className="font-mono">Final context</span> JSON uit een
-            AIFLOW CLI-uitvoering om elke stap te inspecteren.
-          </p>
+        <div className="flex items-center space-x-3">
+          <div className="h-10 w-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+            <Bug className="h-5 w-5 text-indigo-600" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Debug — CLI Trace Viewer
+            </h1>
+            <p className="text-sm text-slate-500">
+              Plak hier de <span className="font-mono">Final context</span> JSON
+              uit de CLI-run om elke stap van je AIFLOW-uitvoering te
+              inspecteren.
+            </p>
+          </div>
         </div>
 
-        <button
-          onClick={handleOpenInBuilder}
-          disabled={!selectedStep}
-          className={`inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium shadow-sm ${
-            selectedStep
-              ? "bg-indigo-600 text-white hover:bg-indigo-700"
-              : "bg-slate-200 text-slate-500 cursor-not-allowed"
-          }`}
-        >
-          Open in Workflow Builder
-          <ChevronRight className="ml-2" size={16} />
-        </button>
+        {/* Jump naar Workflow Builder */}
+        {onJumpToAgent && trace.length > 0 && selectedStepIndex !== null && (
+          <button
+            type="button"
+            onClick={() =>
+              onJumpToAgent(trace[selectedStepIndex!].agentId)
+            }
+            className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-800 shadow-sm"
+          >
+            Open in Workflow Builder
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </button>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-6 mb-6">
-        {/* Left: JSON input */}
-        <div className="flex flex-col">
-          <label className="text-xs font-semibold text-slate-600 mb-2 uppercase tracking-wide">
-            1. Plak hier de JSON van <span className="font-mono">Final context</span>:
-          </label>
+      {/* Input + uitleg */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">
+              1. Plak hier de JSON van{' '}
+              <span className="font-mono">Final context:</span>
+            </span>
+            <button
+              type="button"
+              onClick={handleParse}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+            >
+              Parse trace
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </button>
+          </div>
           <textarea
             value={rawJson}
             onChange={(e) => setRawJson(e.target.value)}
-            placeholder='Bijvoorbeeld: { "ticket_text": "...", "output_agent1": {...}, "__trace": [...] }'
-            className="flex-1 min-h-[220px] font-mono text-xs bg-slate-900 text-slate-100 rounded-xl p-3 border border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            className="w-full h-64 border border-slate-300 rounded-lg px-3 py-2 font-mono text-xs text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            placeholder={`Voorbeeld:\n{\n  "ticket_text": "...",\n  "output_agent1": { ... },\n  "output_agent2": "...",\n  "__trace": [ ... ]\n}`}
           />
-          <div className="mt-2 flex items-center justify-between">
-            <div className="text-xs text-emerald-700 flex items-center">
-              <span className="font-semibold mr-1">Tip:</span> kopieer alleen het JSON-blok na{" "}
-              <span className="font-mono">"Final context":</span> uit de CLI, niet de volledige
-              terminal-output.
-            </div>
-            <button
-              onClick={handleParse}
-              className="inline-flex items-center px-3 py-2 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 shadow-sm"
-            >
-              Parse trace
-            </button>
-          </div>
+          <p className="text-xs text-slate-500">
+            ✅ Tip: kopieer alleen het JSON-blok na{' '}
+            <span className="font-mono">"Final context:"</span> uit de CLI, niet
+            de volledige terminal-output.
+          </p>
           {error && (
-            <div className="mt-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {error}
+            <div className="flex items-start space-x-2 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">
+              <AlertTriangle className="h-4 w-4 mt-0.5" />
+              <span>{error}</span>
             </div>
           )}
         </div>
 
-        {/* Right: context overview */}
-        <div className="flex flex-col">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-              Context overzicht
-            </label>
+        {/* Samenvatting context */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-slate-800 flex items-center">
+            <ListTree className="h-4 w-4 mr-2 text-slate-400" />
+            Context overzicht
+          </h2>
+          {context ? (
+            <div className="border border-slate-100 rounded-lg bg-slate-50 max-h-60 overflow-auto">
+              <pre className="text-[11px] leading-relaxed text-slate-800 p-3 font-mono whitespace-pre">
+                {renderJson(
+                  Object.fromEntries(
+                    Object.entries(context).filter(([key]) => key !== '__trace')
+                  )
+                )}
+              </pre>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">
+              Nog geen context geladen. Klik op{' '}
+              <strong>Parse trace</strong> nadat je JSON hebt geplakt.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Trace timeline + controls */}
+      <div className="mt-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-800 flex items-center">
+            Execution Trace
+            {trace.length > 0 && (
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                ({trace.length} step{trace.length === 1 ? '' : 's'})
+              </span>
+            )}
+          </h2>
+
+          <div className="flex items-center space-x-2">
             <button
-              onClick={handlePlayClick}
+              type="button"
+              onClick={handleTogglePlay}
               disabled={trace.length === 0}
-              className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium shadow-sm ${
+              className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium shadow-sm ${
                 trace.length === 0
-                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                   : isPlaying
-                  ? "bg-slate-900 text-white"
-                  : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50"
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50'
               }`}
             >
               {isPlaying ? (
                 <>
-                  <Pause size={14} className="mr-1" /> Pause
+                  <Square className="h-3 w-3 mr-1" />
+                  Pause
                 </>
               ) : (
                 <>
-                  <Play size={14} className="mr-1" /> Play trace
+                  <Play className="h-3 w-3 mr-1" />
+                  Play trace
                 </>
               )}
             </button>
           </div>
-          <div className="flex-1 min-h-[220px] bg-white rounded-xl border border-slate-200 p-3 overflow-auto font-mono text-xs text-slate-800">
-            {parsedContext ? (
-              <pre>{JSON.stringify(parsedContext, null, 2)}</pre>
-            ) : (
-              <span className="text-slate-400">
-                Nog geen context. Plak eerst de JSON en klik op <strong>Parse trace</strong>.
-              </span>
-            )}
-          </div>
         </div>
-      </div>
-
-      {/* Execution trace */}
-      <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 overflow-auto">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-baseline space-x-2">
-            <h2 className="text-sm font-semibold text-slate-800">Execution Trace</h2>
-            <span className="text-xs text-slate-400">
-              {trace.length > 0 ? `(${trace.length} steps)` : "(geen steps)"}
-            </span>
-          </div>
-        </div>
-
-        {trace.length === 0 && (
-          <div className="text-sm text-slate-400">
-            Nog geen trace geladen. Plak een <span className="font-mono">Final context</span>{" "}
-            JSON en klik op <strong>Parse trace</strong>.
-          </div>
-        )}
 
         {trace.length > 0 && (
-          <div className="space-y-4">
-            {/* Step indicator pills */}
-            <div className="flex items-center space-x-2 mb-2">
-              {trace.map((step, idx) => {
-                const isActive = idx === selectedStepIndex;
+          <div className="mb-5 overflow-x-auto pb-2">
+            <div className="flex items-center space-x-2 min-w-max">
+              {trace.map((step, index) => {
+                const isActive = selectedStepIndex === index;
                 return (
-                  <button
-                    key={step.step}
-                    onClick={() => handleSelectStep(idx)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-all ${
-                      isActive
-                        ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                    }`}
-                  >
-                    STEP {step.step} · {step.agentName}
-                  </button>
+                  <React.Fragment key={step.step ?? index}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsPlaying(false);
+                        handleSelectStep(index);
+                      }}
+                      className={`flex flex-col items-center px-3 py-2 rounded-xl border text-xs font-medium transition-all ${
+                        isActive
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-[10px] uppercase tracking-wide opacity-75 mb-0.5">
+                        Step {step.step}
+                      </span>
+                      <span className="font-semibold truncate max-w-[120px]">
+                        {step.agentName}
+                      </span>
+                      <span className="text-[10px] mt-0.5 opacity-80">
+                        {step.role}
+                      </span>
+                    </button>
+                    {index < trace.length - 1 && (
+                      <div className="hidden md:flex flex-1 h-px bg-slate-200 mx-1" />
+                    )}
+                  </React.Fragment>
                 );
               })}
             </div>
+          </div>
+        )}
 
-            {/* Selected step details */}
-            {selectedStep && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-4">
-                  {/* Input Context */}
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                        Input Context
-                      </span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 font-medium">
-                        {selectedStep.agentName} · {selectedStep.role}
-                      </span>
-                    </div>
-                    <pre className="font-mono text-[11px] text-slate-800 overflow-auto max-h-64">
-                      {JSON.stringify(selectedStep.inputContext, null, 2)}
-                    </pre>
-                  </div>
+        {trace.length === 0 ? (
+          <div className="border border-dashed border-slate-300 rounded-xl p-6 text-center text-sm text-slate-500 bg-slate-50">
+            Nog geen trace gevonden. Plak de JSON en klik op{' '}
+            <span className="font-medium">Parse trace</span> om de stappen te
+            zien.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {trace.map((step, index) => {
+              const matchedRule = step.rulesEvaluated?.find(
+                (r) => r.id === step.selectedRuleId
+              );
+              const isActive = selectedStepIndex === index;
 
-                  {/* Parsed Output */}
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                        Parsed Output
-                      </span>
-                    </div>
-                    <pre className="font-mono text-[11px] text-slate-800 overflow-auto max-h-64">
-                      {JSON.stringify(selectedStep.parsedOutput, null, 2)}
-                    </pre>
-                  </div>
-
-                  {/* Evaluated rules */}
-                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                        Evaluated Rules
-                      </span>
-                    </div>
-                    {selectedStep.rulesEvaluated && selectedStep.rulesEvaluated.length > 0 ? (
-                      <div className="space-y-2 text-[11px]">
-                        {selectedStep.rulesEvaluated.map((rule) => {
-                          const isSelected = rule.id === selectedStep.selectedRuleId;
-                          return (
-                            <div
-                              key={rule.id}
-                              className={`rounded-lg border px-2 py-1.5 ${
-                                isSelected
-                                  ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                  : "bg-white border-slate-200 text-slate-700"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-mono text-[10px]">{rule.id}</span>
-                                <span
-                                  className={`text-[10px] font-semibold ${
-                                    rule.result ? "text-emerald-700" : "text-slate-400"
-                                  }`}
-                                >
-                                  {rule.result ? "TRUE" : "FALSE"}
-                                </span>
-                              </div>
-                              <div className="text-[10px] mt-1 text-slate-500">
-                                {rule.from} → {rule.to}
-                              </div>
-                              <div className="text-[10px] mt-1 font-mono text-slate-600">
-                                {rule.condition}
-                              </div>
-                            </div>
-                          );
-                        })}
+              return (
+                <div
+                  key={step.step}
+                  id={`trace-step-${index}`}
+                  className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all ${
+                    isActive ? 'ring-2 ring-indigo-500 ring-offset-1' : ''
+                  }`}
+                >
+                  <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div
+                        className={`h-7 w-7 rounded-lg flex items-center justify-center ${
+                          isActive
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-indigo-50 text-indigo-700'
+                        }`}
+                      >
+                        <span className="text-xs font-semibold">
+                          {step.step}
+                        </span>
                       </div>
-                    ) : (
-                      <p className="text-[11px] text-slate-400">
-                        Geen regels geëvalueerd voor deze stap.
-                      </p>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm font-semibold text-slate-900">
+                            {step.agentName}
+                          </span>
+                          <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 font-mono">
+                            {step.role}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 font-mono">
+                          {step.agentId}
+                          {step.nextAgentId && (
+                            <>
+                              <span className="mx-2 text-slate-400">→</span>
+                              <span className="text-slate-600">
+                                Next: {step.nextAgentId}
+                              </span>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    {matchedRule && (
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[11px] uppercase tracking-wide text-slate-400">
+                          Rule
+                        </span>
+                        <span className="px-2 py-1 rounded-full text-[11px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {matchedRule.id}
+                        </span>
+                      </div>
                     )}
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
+                    {/* Input context */}
+                    <div className="border-r border-slate-100 p-4">
+                      <h3 className="text-xs font-semibold text-slate-700 mb-2">
+                        Input Context
+                      </h3>
+                      <div className="bg-slate-50 border border-slate-100 rounded-lg max-h-56 overflow-auto">
+                        <pre className="text-[11px] leading-relaxed text-slate-800 p-3 font-mono whitespace-pre">
+                          {renderJson(step.inputContext)}
+                        </pre>
+                      </div>
+                    </div>
+
+                    {/* Parsed output */}
+                    <div className="border-r border-slate-100 p-4">
+                      <h3 className="text-xs font-semibold text-slate-700 mb-2">
+                        Parsed Output
+                      </h3>
+                      <div className="bg-slate-50 border border-slate-100 rounded-lg max-h-56 overflow-auto">
+                        <pre className="text-[11px] leading-relaxed text-slate-800 p-3 font-mono whitespace-pre">
+                          {renderJson(step.parsedOutput)}
+                        </pre>
+                      </div>
+                    </div>
+
+                    {/* Rules */}
+                    <div className="p-4">
+                      <h3 className="text-xs font-semibold text-slate-700 mb-2">
+                        Evaluated Rules
+                      </h3>
+                      {step.rulesEvaluated && step.rulesEvaluated.length > 0 ? (
+                        <div className="space-y-2 max-h-56 overflow-auto">
+                          {step.rulesEvaluated.map((rule) => (
+                            <div
+                              key={rule.id}
+                              className={`border rounded-lg px-3 py-2 text-[11px] ${
+                                rule.result
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-600'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-mono">{rule.id}</span>
+                                <span className="font-semibold">
+                                  {rule.result ? 'TRUE' : 'FALSE'}
+                                </span>
+                              </div>
+                              <p className="font-mono text-[11px] text-slate-700">
+                                {rule.from} → {rule.to}
+                              </p>
+                              <p className="mt-1 italic text-[11px]">
+                                {rule.condition}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          Geen regels geëvalueerd voor deze stap.
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })}
           </div>
         )}
       </div>
@@ -346,4 +454,4 @@ const DebugTraceViewer: React.FC<DebugTraceViewerProps> = ({
   );
 };
 
-export default DebugTraceViewer;
+export default DebugTraceView;
