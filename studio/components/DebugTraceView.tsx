@@ -89,8 +89,11 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
   // Filters
   const [agentFilter, setAgentFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showRoutingOnly, setShowRoutingOnly] = useState(false);
 
-  const [diffModeByStep, setDiffModeByStep] = useState<Record<number, boolean>>({});
+  const [diffModeByStep, setDiffModeByStep] = useState<Record<number, boolean>>(
+    {}
+  );
 
   const handleParse = () => {
     try {
@@ -152,7 +155,6 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
     const interval = setInterval(() => {
       setSelectedStepIndex((prev) => {
         if (prev === null) {
-          // begin altijd bij eerste step
           const nextIndex = 0;
           const elStart = document.getElementById(`trace-step-${nextIndex}`);
           if (elStart) {
@@ -163,7 +165,6 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
 
         const next = prev + 1;
         if (next >= trace.length) {
-          // einde bereikt → stop play
           setIsPlaying(false);
           return prev;
         }
@@ -205,27 +206,25 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
     onHighlightPath(Array.from(nodes), edges);
   };
 
-  // Afgeleide trace op basis van filter & zoekterm
+  // Afgeleide trace op basis van filters
   const normalizedAgentFilter = agentFilter.trim().toLowerCase();
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
 
   const visibleTrace = trace.filter((step) => {
-    // 1) Agent-filter (naam, id of role)
     const matchesAgent =
       !normalizedAgentFilter ||
       step.agentName.toLowerCase().includes(normalizedAgentFilter) ||
       step.agentId.toLowerCase().includes(normalizedAgentFilter) ||
       step.role.toLowerCase().includes(normalizedAgentFilter);
 
-    if (!normalizedSearchTerm) {
-      return matchesAgent;
-    }
-
-    // 2) Algemene zoekterm door de hele step (context, output, rules, etc.)
     const haystack = JSON.stringify(step).toLowerCase();
-    const matchesSearch = haystack.includes(normalizedSearchTerm);
+    const matchesSearch =
+      !normalizedSearchTerm || haystack.includes(normalizedSearchTerm);
 
-    return matchesAgent && matchesSearch;
+    const matchesRouting =
+      !showRoutingOnly || (step.selectedRuleId != null && step.selectedRuleId !== '');
+
+    return matchesAgent && matchesSearch && matchesRouting;
   });
 
   return (
@@ -347,7 +346,7 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
             )}
           </h2>
 
-        <div className="flex flex-col md:flex-row md:items-center gap-2">
+          <div className="flex flex-col md:flex-row md:items-center gap-2">
             {/* Agent-filter */}
             <div className="flex items-center gap-1">
               <input
@@ -370,6 +369,22 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
                 className="px-2 py-1 rounded-lg border border-slate-300 text-xs text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
+
+            {/* Routing-only toggle */}
+            <button
+              type="button"
+              onClick={() => setShowRoutingOnly((prev) => !prev)}
+              disabled={trace.length === 0}
+              className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-medium border ${
+                trace.length === 0
+                  ? 'border-slate-200 text-slate-300 bg-slate-50 cursor-not-allowed'
+                  : showRoutingOnly
+                  ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {showRoutingOnly ? 'Only routing steps' : 'All steps'}
+            </button>
 
             {/* Play-knop */}
             <button
