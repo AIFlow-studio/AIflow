@@ -82,14 +82,22 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
     const createGlow = (id: string, _color: string) => {
-        const f = defs.append("filter").attr("id", id).attr("height", "150%").attr("width", "150%").attr("x", "-25%").attr("y", "-25%");
-        f.append("feGaussianBlur").attr("stdDeviation", 4.5).attr("result", "coloredBlur");
-        const m = f.append("feMerge");
-        m.append("feMergeNode").attr("in", "coloredBlur");
-        m.append("feMergeNode").attr("in", "SourceGraphic");
+      const f = defs
+        .append('filter')
+        .attr('id', id)
+        .attr('height', '150%')
+        .attr('width', '150%')
+        .attr('x', '-25%')
+        .attr('y', '-25%');
+      f.append('feGaussianBlur')
+        .attr('stdDeviation', 4.5)
+        .attr('result', 'coloredBlur');
+      const m = f.append('feMerge');
+      m.append('feMergeNode').attr('in', 'coloredBlur');
+      m.append('feMergeNode').attr('in', 'SourceGraphic');
     };
-    createGlow("glow-indigo", "");
-    createGlow("glow-amber", "");
+    createGlow('glow-indigo', '');
+    createGlow('glow-amber', '');
 
     // --- Graph Container ---
     const g = svg.append("g");
@@ -224,7 +232,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
                 // Find drop target (simple distance check)
                 const mouseX = event.x;
                 const mouseY = event.y;
-                let targetId = null;
+                let targetId: string | null = null;
                 
                 // Check collision with other nodes
                 nodes.forEach((n: any) => {
@@ -349,6 +357,30 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
         }
     });
 
+    // --- Path Step Badge (small circle with step number) ---
+    const badgeGroup = agentNodes
+      .append('g')
+      .attr('class', 'path-badge')
+      .attr('transform', 'translate(85,-32)')
+      .style('display', 'none');
+
+    badgeGroup
+      .append('circle')
+      .attr('r', 9)
+      .attr('fill', '#EEF2FF')
+      .attr('stroke', '#6366F1')
+      .attr('stroke-width', 1.5);
+
+    badgeGroup
+      .append('text')
+      .attr('class', 'path-badge-text')
+      .attr('text-anchor', 'middle')
+      .attr('dy', '0.35em')
+      .attr('font-size', 9)
+      .attr('font-weight', 600)
+      .attr('fill', '#4F46E5')
+      .text('');
+
     // --- Tool Node Styling ---
     const toolNodes = nodeGroup.filter((d: any) => d.isTool);
 
@@ -362,8 +394,8 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       .attr("fill", "#FFFBEB")
       .on("click", (event: any, d: any) => {
         if (!isLinkingRef.current) {
-            if (onNodeClick) onNodeClick(d.id);
-            else onSelectAgent(d.id);
+          if (onNodeClick) onNodeClick(d.id);
+          else onSelectAgent(d.id);
         }
       })
       .on("contextmenu", (event: any, d: any) => {
@@ -438,7 +470,9 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       // Node rectangles: selection, linking mode, and optional path highlight
       svg.selectAll(".node-rect")
           .attr("stroke", (d: any) => {
-              const isOnPath = Array.isArray(highlightedNodeIds) && highlightedNodeIds.includes(d.id);
+              const isOnPath =
+                Array.isArray(highlightedNodeIds) &&
+                highlightedNodeIds.includes(d.id);
 
               if (selectedNodeId === d.id) {
                   // Selected node always wins
@@ -458,7 +492,9 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               return "#E2E8F0";
           })
           .attr("stroke-width", (d: any) => {
-              const isOnPath = Array.isArray(highlightedNodeIds) && highlightedNodeIds.includes(d.id);
+              const isOnPath =
+                Array.isArray(highlightedNodeIds) &&
+                highlightedNodeIds.includes(d.id);
 
               if (selectedNodeId === d.id) return 4;
               if (isOnPath) return 3;
@@ -466,7 +502,9 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
               return 1;
           })
           .style("filter", (d: any) => {
-              const isOnPath = Array.isArray(highlightedNodeIds) && highlightedNodeIds.includes(d.id);
+              const isOnPath =
+                Array.isArray(highlightedNodeIds) &&
+                highlightedNodeIds.includes(d.id);
 
               if (selectedNodeId === d.id) {
                   return d.isTool ? "url(#glow-amber)" : "url(#glow-indigo)";
@@ -491,7 +529,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             Array.isArray(highlightedEdges) && highlightedEdges.length > 0;
 
           const isInPath = hasPath
-            ? highlightedEdges.some(
+            ? highlightedEdges!.some(
                 (e) => e.from === sourceId && e.to === targetId
               )
             : false;
@@ -528,7 +566,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             Array.isArray(highlightedEdges) && highlightedEdges.length > 0;
 
           const isInPath = hasPath
-            ? highlightedEdges.some(
+            ? highlightedEdges!.some(
                 (e) => e.from === sourceId && e.to === targetId
               )
             : false;
@@ -560,7 +598,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
             Array.isArray(highlightedEdges) && highlightedEdges.length > 0;
 
           const isInPath = hasPath
-            ? highlightedEdges.some(
+            ? highlightedEdges!.some(
                 (e) => e.from === sourceId && e.to === targetId
               )
             : false;
@@ -588,6 +626,38 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           }
 
           return isConnectedToSelected ? 1 : 0.35;
+        });
+
+      // --- Step badges: map highlightedNodeIds → 1,2,3,... per node
+      const indexMap: Record<string, number> = {};
+      const idList = Array.isArray(highlightedNodeIds) ? highlightedNodeIds : [];
+
+      // Gebruik zowel agentId als agentName als sleutel
+      nodesRef.current.forEach((node) => {
+        const candidates = [node.id, node.name]
+          .filter(Boolean)
+          .map((v) => String(v).toLowerCase());
+
+        const matchIndex = idList.findIndex((val) =>
+          candidates.includes(String(val).toLowerCase())
+        );
+
+        if (matchIndex !== -1 && indexMap[node.id] == null) {
+          indexMap[node.id] = matchIndex + 1;
+        }
+      });
+
+      svg
+        .selectAll('.path-badge')
+        .style('display', (d: any) =>
+          indexMap[d.id] != null && idList.length > 0 ? 'block' : 'none'
+        );
+
+      svg
+        .selectAll('.path-badge-text')
+        .text((d: any) => {
+          const idx = indexMap[d.id];
+          return idx != null ? String(idx) : '';
         });
   }, [selectedNodeId, isLinkingMode, linkingSourceId, highlightedNodeIds, highlightedEdges]);
 
