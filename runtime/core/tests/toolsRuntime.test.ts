@@ -3,8 +3,12 @@ import {
   resolveToolDefinition,
   buildAuthHeaders,
   buildHttpRequest,
+  runToolsForAgent,
 } from "../toolsRuntime.mts";
-import type { ToolDefinition, ToolRegistry } from "../../../core/types";
+import type {
+  ToolDefinition,
+  ToolRegistry,
+} from "../../../core/types";
 
 describe("toolsRuntime", () => {
   it("resolveToolDefinition returns tool from registry or null", () => {
@@ -140,5 +144,64 @@ describe("toolsRuntime", () => {
     expect(() => buildHttpRequest(def, {})).toThrowError(
       /only supports HTTP tools/i
     );
+  });
+
+  it("runToolsForAgent returns same context and empty results when no tools", async () => {
+    const context = { foo: "bar" };
+
+    const result = await runToolsForAgent({
+      agentId: "agent1",
+      agentTools: [],
+      registry: {},
+      context,
+      parsedOutput: { x: 1 },
+    });
+
+    expect(result.updatedContext).toEqual(context);
+    expect(result.toolResults).toEqual({});
+  });
+
+  it("runToolsForAgent writes error for missing tools into context.__tools", async () => {
+    const context: Record<string, any> = {};
+
+    const result = await runToolsForAgent({
+      agentId: "agent1",
+      agentTools: ["unknown_tool"],
+      registry: {},
+      context,
+      parsedOutput: {},
+    });
+
+    expect(result.toolResults["unknown_tool"].ok).toBe(false);
+    expect(result.toolResults["unknown_tool"].error).toMatch(/not found/i);
+
+    expect(result.updatedContext.__tools).toBeDefined();
+    expect(result.updatedContext.__tools.agent1).toBeDefined();
+    expect(result.updatedContext.__tools.agent1.unknown_tool).toEqual(
+      result.toolResults["unknown_tool"]
+    );
+  });
+
+  it("runToolsForAgent returns error for unsupported tool types", async () => {
+    const registry: ToolRegistry = {
+      builtin_tool: { type: "builtin" } as any,
+    };
+
+    const context: Record<string, any> = {};
+
+    const result = await runToolsForAgent({
+      agentId: "agent1",
+      agentTools: ["builtin_tool"],
+      registry,
+      context,
+      parsedOutput: {},
+    });
+
+    const res = result.toolResults["builtin_tool"];
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/not implemented/i);
+
+    expect(result.updatedContext.__tools.agent1.builtin_tool).toEqual(res);
   });
 });

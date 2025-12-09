@@ -224,3 +224,105 @@ export async function executeHttpTool(
     rawBody,
   };
 }
+
+/**
+ * Input voor tools-executie per agent.
+ */
+export interface AgentToolExecutionInput {
+  agentId: string;
+  agentTools: string[];
+  registry: ToolRegistry;
+  context: Record<string, any>;
+  parsedOutput: any;
+  globalApiKey?: string;
+}
+
+/**
+ * Resultaat van tools-executie per agent.
+ */
+export interface AgentToolExecutionResult {
+  updatedContext: Record<string, any>;
+  toolResults: Record<string, ToolExecutionResult>;
+}
+
+/**
+ * Run alle tools die aan een agent gekoppeld zijn.
+ *
+ * - Zoekt definitions in registry
+ * - Voert HTTP-tools uit met parsedOutput als input
+ * - Schrijft resultaten onder context.__tools[agentId][toolName]
+ * - Geeft zowel updatedContext als toolResults terug
+ */
+export async function runToolsForAgent(
+  input: AgentToolExecutionInput
+): Promise<AgentToolExecutionResult> {
+  const { agentId, agentTools, registry, context, parsedOutput, globalApiKey } =
+    input;
+
+  // Geen tools → context ongewijzigd teruggeven
+  if (!agentTools || agentTools.length === 0) {
+    return {
+      updatedContext: { ...context },
+      toolResults: {},
+    };
+  }
+
+  const updatedContext: Record<string, any> = { ...context };
+  const toolResults: Record<string, ToolExecutionResult> = {};
+
+  // Zorg voor context.__tools[agentId]
+  if (!updatedContext.__tools || typeof updatedContext.__tools !== "object") {
+    updatedContext.__tools = {};
+  }
+  if (!updatedContext.__tools[agentId]) {
+    updatedContext.__tools[agentId] = {};
+  }
+
+  const agentBucket = updatedContext.__tools[agentId];
+
+  for (const toolName of agentTools) {
+    const def = resolveToolDefinition(toolName, registry);
+
+    if (!def) {
+      const res: ToolExecutionResult = {
+        ok: false,
+        status: null,
+        error: `Tool '${toolName}' not found in registry`,
+      };
+      toolResults[toolName] = res;
+      agentBucket[toolName] = res;
+      continue;
+    }
+
+    if (def.type === "http") {
+      try {
+        const execRes = await executeHttpTool(def, {
+          input: parsedOutput,
+          globalApiKey,
+        });
+        toolResults[toolName] = execRes;
+        agentBucket[toolName] = execRes;
+      } catch (err: any) {
+        const res: ToolExecutionResult = {
+          ok: false,
+          status: null,
+          error: err?.message || String(err),
+        };
+        toolResults[toolName] = res;
+        agentBucket[toolName] = res;
+      }
+      continue;
+    }
+
+    // Nog niet geïmplementeerde types (builtin/python)
+    const res: ToolExecutionResult = {
+      ok: false,
+      status: null,
+      error: `Tool type '${def.type}' is not implemented in runtime`,
+    };
+    toolResults[toolName] = res;
+    agentBucket[toolName] = res;
+  }
+
+  return { updatedContext, toolResults };
+}

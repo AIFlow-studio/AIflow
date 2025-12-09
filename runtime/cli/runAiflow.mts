@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { GoogleGenAI } from "@google/genai";
 import { validateFlow } from "../core/validateFlow.mts";
 import { evaluateCondition } from "../core/evaluateCondition.mts";
+import { runToolsForAgent } from "../core/toolsRuntime.mts";
 
 // Kleine helper om ```json ... ``` naar echte JSON te parsen
 export function tryParseJson(text: string): any {
@@ -81,6 +82,7 @@ async function run() {
   const logicRules: any[] = Array.isArray(project.flow?.logic)
     ? project.flow.logic
     : [];
+  const toolsRegistry: Record<string, any> = project.tools || {};
 
   let steps = 0;
   const MAX_STEPS = 10;
@@ -134,6 +136,36 @@ Respond in ${agent.output_format || "text"}.
     // Sla output op in de context onder deze agent-id
     context[`output_${currentAgentId}`] = parsed;
 
+    // 🧩 Tools Runtime integratie (optioneel per agent)
+    const agentTools: string[] = Array.isArray(agent.tools) ? agent.tools : [];
+    let toolResults: Record<string, any> = {};
+
+    if (
+      agentTools.length > 0 &&
+      toolsRegistry &&
+      Object.keys(toolsRegistry).length > 0
+    ) {
+      try {
+        const toolExec = await runToolsForAgent({
+          agentId: currentAgentId,
+          agentTools,
+          registry: toolsRegistry,
+          context: { ...context },
+          parsedOutput: parsed,
+          globalApiKey: API_KEY,
+        });
+
+        // Context updaten met toolresultaten
+        Object.assign(context, toolExec.updatedContext);
+        toolResults = toolExec.toolResults;
+      } catch (err) {
+        console.warn(
+          `⚠️ Tool execution failed for agent '${currentAgentId}':`,
+          err
+        );
+      }
+    }
+
     // ✅ Expression-based routing: kies de eerste rule waarvan de condition waar is
     const rulesForAgent = logicRules.filter(
       (rule) => rule.from === currentAgentId
@@ -169,7 +201,7 @@ Respond in ${agent.output_format || "text"}.
       }
     }
 
-    // ✅ Trace entry maken voor deze stap
+    // ✅ Trace entry maken voor deze stap (incl. tools)
     trace.push({
       step: steps,
       agentId: currentAgentId,
@@ -178,6 +210,7 @@ Respond in ${agent.output_format || "text"}.
       inputContext: { ...context },
       rawOutput,
       parsedOutput: parsed,
+      tools: toolResults,
       rulesEvaluated: ruleResults,
       selectedRuleId: nextRule?.id ?? null,
       nextAgentId: nextRule?.to ?? null,
