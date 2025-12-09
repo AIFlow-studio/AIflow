@@ -35,6 +35,37 @@ type TracePayload = {
   [key: string]: unknown;
 };
 
+type DiffObject = Record<string, unknown>;
+
+const computeContextDiff = (
+  prev: Record<string, unknown>,
+  curr: Record<string, unknown>
+): DiffObject => {
+  const diff: DiffObject = {};
+  const prevKeys = new Set(Object.keys(prev));
+  const currKeys = new Set(Object.keys(curr));
+
+  for (const key of currKeys) {
+    if (!prevKeys.has(key)) {
+      diff[key] = { __change: 'added', value: curr[key] };
+    } else {
+      const prevVal = prev[key];
+      const currVal = curr[key];
+      if (JSON.stringify(prevVal) !== JSON.stringify(currVal)) {
+        diff[key] = { __change: 'changed', before: prevVal, after: currVal };
+      }
+    }
+  }
+
+  for (const key of prevKeys) {
+    if (!currKeys.has(key)) {
+      diff[key] = { __change: 'removed', before: prev[key] };
+    }
+  }
+
+  return diff;
+};
+
 interface DebugTraceViewProps {
   onJumpToAgent?: (agentId: string) => void;
   onHighlightPath?: (nodes: string[], edges: { from: string; to: string }[]) => void;
@@ -58,6 +89,8 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
   // Filters
   const [agentFilter, setAgentFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+
+  const [diffModeByStep, setDiffModeByStep] = useState<Record<number, boolean>>({});
 
   const handleParse = () => {
     try {
@@ -314,7 +347,7 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
             )}
           </h2>
 
-          <div className="flex flex-col md:flex-row md:items-center gap-2">
+        <div className="flex flex-col md:flex-row md:items-center gap-2">
             {/* Agent-filter */}
             <div className="flex items-center gap-1">
               <input
@@ -424,6 +457,21 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
               );
               const isActive = selectedStepIndex === originalIndex;
 
+              const previousStep =
+                originalIndex > 0 ? trace[originalIndex - 1] : undefined;
+              const previousInput = previousStep
+                ? (previousStep.inputContext as Record<string, unknown>)
+                : undefined;
+              const isDiffMode = !!diffModeByStep[originalIndex];
+
+              const contextToRender =
+                isDiffMode && previousInput
+                  ? computeContextDiff(
+                      previousInput,
+                      step.inputContext as Record<string, unknown>
+                    )
+                  : step.inputContext;
+
               return (
                 <div
                   key={step.step}
@@ -468,13 +516,23 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
                       </div>
                     </div>
                     {matchedRule && (
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[11px] uppercase tracking-wide text-slate-400">
-                          Rule
-                        </span>
-                        <span className="px-2 py-1 rounded-full text-[11px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          {matchedRule.id}
-                        </span>
+                      <div className="flex flex-col items-end space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[11px] uppercase tracking-wide text-slate-400">
+                            Rule
+                          </span>
+                          <span className="px-2 py-1 rounded-full text-[11px] font-mono bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {matchedRule.id}
+                          </span>
+                        </div>
+                        {step.nextAgentId && (
+                          <p className="text-[11px] text-slate-500">
+                            Route selected →{' '}
+                            <span className="font-mono text-slate-700">
+                              {step.nextAgentId}
+                            </span>
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -482,12 +540,35 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-0">
                     {/* Input context */}
                     <div className="border-r border-slate-100 p-4">
-                      <h3 className="text-xs font-semibold text-slate-700 mb-2">
-                        Input Context
-                      </h3>
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-xs font-semibold text-slate-700">
+                          Input Context
+                        </h3>
+                        <button
+                          type="button"
+                          disabled={!previousInput}
+                          onClick={() =>
+                            setDiffModeByStep((prev) => ({
+                              ...prev,
+                              [originalIndex]: !prev[originalIndex],
+                            }))
+                          }
+                          className={`text-[10px] px-2 py-1 rounded-md border ${
+                            !previousInput
+                              ? 'border-slate-200 text-slate-300 cursor-not-allowed bg-slate-50'
+                              : isDiffMode
+                              ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                              : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                          }`}
+                        >
+                          {isDiffMode
+                            ? 'Toon volledige context'
+                            : 'Toon alleen wijzigingen'}
+                        </button>
+                      </div>
                       <div className="bg-slate-50 border border-slate-100 rounded-lg max-h-56 overflow-auto">
                         <pre className="text-[11px] leading-relaxed text-slate-800 p-3 font-mono whitespace-pre">
-                          {renderJson(step.inputContext)}
+                          {renderJson(contextToRender)}
                         </pre>
                       </div>
                     </div>
@@ -511,29 +592,42 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({
                       </h3>
                       {step.rulesEvaluated && step.rulesEvaluated.length > 0 ? (
                         <div className="space-y-2 max-h-56 overflow-auto">
-                          {step.rulesEvaluated.map((rule) => (
-                            <div
-                              key={rule.id}
-                              className={`border rounded-lg px-3 py-2 text-[11px] ${
-                                rule.result
-                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                                  : 'bg-slate-50 border-slate-200 text-slate-600'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="font-mono">{rule.id}</span>
-                                <span className="font-semibold">
-                                  {rule.result ? 'TRUE' : 'FALSE'}
-                                </span>
+                          {step.rulesEvaluated.map((rule) => {
+                            const isSelectedRoute =
+                              !!step.selectedRuleId &&
+                              rule.id === step.selectedRuleId;
+
+                            return (
+                              <div
+                                key={rule.id}
+                                className={`border rounded-lg px-3 py-2 text-[11px] ${
+                                  rule.result
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-mono">{rule.id}</span>
+                                  <div className="flex items-center space-x-1">
+                                    <span className="font-semibold">
+                                      {rule.result ? 'TRUE' : 'FALSE'}
+                                    </span>
+                                    {isSelectedRoute && (
+                                      <span className="px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-semibold">
+                                        ROUTE SELECTED
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <p className="font-mono text-[11px] text-slate-700">
+                                  {rule.from} → {rule.to}
+                                </p>
+                                <p className="mt-1 italic text-[11px]">
+                                  {rule.condition}
+                                </p>
                               </div>
-                              <p className="font-mono text-[11px] text-slate-700">
-                                {rule.from} → {rule.to}
-                              </p>
-                              <p className="mt-1 italic text-[11px]">
-                                {rule.condition}
-                              </p>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="text-xs text-slate-500">
