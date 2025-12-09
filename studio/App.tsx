@@ -53,7 +53,10 @@ const App: React.FC = () => {
   // UI State
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [editingLink, setEditingLink] = useState<{id: string, condition: string, mapping?: string} | null>(null);
+  const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
+  const [highlightedEdges, setHighlightedEdges] = useState<{ from: string; to: string }[]>([]);
   const [isLinkingMode, setIsLinkingMode] = useState(false);
+
   const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
   const [activePromptFile, setActivePromptFile] = useState<string | null>(null);
   const [promptContent, setPromptContent] = useState("");
@@ -130,11 +133,23 @@ const App: React.FC = () => {
   };
 
   const handleJumpToAgentFromTrace = (agentId: string) => {
+    setHighlightedNodeIds([]);
+    setHighlightedEdges([]);
     setSelectedAgentId(agentId);
     setCurrentView(ViewState.WORKFLOW);
   };
 
+  const handleHighlightPathFromTrace = (nodes: string[], edges: { from: string; to: string }[]) => {
+    setHighlightedNodeIds(nodes);
+    setHighlightedEdges(edges);
+    if (nodes.length > 0) {
+      setSelectedAgentId(nodes[0]);
+    }
+    setCurrentView(ViewState.WORKFLOW);
+  };
+
   // --- Helpers ---
+
   const updateProject = (newProject: AIFlowProject, transient = false) => {
     setSessions(prev => prev.map(s => {
         if (s.id === activeSessionId) {
@@ -750,18 +765,20 @@ const App: React.FC = () => {
 
                 <div className="flex flex-1 gap-6 min-h-0 relative">
                     <div className="flex-1">
-                        <WorkflowGraph 
-                            project={project} 
-                            onSelectAgent={setSelectedAgentId}
-                            onEditCondition={(id, c) => setEditingLink({id, condition: c})}
-                            onNavigateToPrompt={handleNavigateToPrompt}
-                            onNavigateToTools={handleNavigateToTools}
-                            isLinkingMode={isLinkingMode}
-                            linkingSourceId={linkingSourceId}
-                            onNodeClick={handleNodeClick}
-                            selectedNodeId={selectedAgentId}
-                            onLinkCreate={handleLinkCreate}
-                        />
+                    <WorkflowGraph 
+                        project={project} 
+                        onSelectAgent={setSelectedAgentId}
+                        onEditCondition={(id, c) => setEditingLink({id, condition: c})}
+                        onNavigateToPrompt={handleNavigateToPrompt}
+                        onNavigateToTools={handleNavigateToTools}
+                        isLinkingMode={isLinkingMode}
+                        linkingSourceId={linkingSourceId}
+                        onNodeClick={handleNodeClick}
+                        selectedNodeId={selectedAgentId}
+                        onLinkCreate={handleLinkCreate}
+                        highlightedNodeIds={highlightedNodeIds}
+                        highlightedEdges={highlightedEdges}
+                    />
                     </div>
                      {selectedNode && (
                         <div className="w-1/3 min-w-[400px]">
@@ -954,9 +971,15 @@ const App: React.FC = () => {
         );
       }
 
-      if (currentView === ViewState.DEBUG) {
-        return <DebugTraceView onJumpToAgent={handleJumpToAgentFromTrace} />;
-      }
+            if (currentView === ViewState.DEBUG) {
+            return (
+                <DebugTraceView
+                onJumpToAgent={handleJumpToAgentFromTrace}
+                onHighlightPath={handleHighlightPathFromTrace}
+                />
+            );
+            }
+
 
       if (currentView === ViewState.DOCS) {
           return <Documentation />;

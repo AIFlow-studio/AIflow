@@ -37,9 +37,13 @@ type TracePayload = {
 
 interface DebugTraceViewProps {
   onJumpToAgent?: (agentId: string) => void;
+  onHighlightPath?: (nodes: string[], edges: { from: string; to: string }[]) => void;
 }
 
-const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
+const DebugTraceView: React.FC<DebugTraceViewProps> = ({
+  onJumpToAgent,
+  onHighlightPath,
+}) => {
   const [rawJson, setRawJson] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [trace, setTrace] = useState<TraceStep[]>([]);
@@ -151,6 +155,23 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
     setIsPlaying((prev) => !prev);
   };
 
+  const handleHighlightFullPath = () => {
+    if (!onHighlightPath || trace.length === 0) return;
+
+    const nodes = new Set<string>();
+    const edges: { from: string; to: string }[] = [];
+
+    trace.forEach((step) => {
+      if (step.agentId) nodes.add(step.agentId);
+      if (step.nextAgentId) {
+        nodes.add(step.nextAgentId);
+        edges.push({ from: step.agentId, to: step.nextAgentId });
+      }
+    });
+
+    onHighlightPath(Array.from(nodes), edges);
+  };
+
   // Afgeleide trace op basis van filter & zoekterm
   const normalizedAgentFilter = agentFilter.trim().toLowerCase();
   const normalizedSearchTerm = searchTerm.trim().toLowerCase();
@@ -194,17 +215,30 @@ const DebugTraceView: React.FC<DebugTraceViewProps> = ({ onJumpToAgent }) => {
           </div>
         </div>
 
-        {/* Jump naar Workflow Builder */}
-        {onJumpToAgent && trace.length > 0 && selectedStepIndex !== null && (
-          <button
-            type="button"
-            onClick={() => onJumpToAgent(trace[selectedStepIndex].agentId)}
-            className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-800 shadow-sm"
-          >
-            Open in Workflow Builder
-            <ChevronRight className="h-4 w-4 ml-1" />
-          </button>
-        )}
+        {/* Jump naar Workflow Builder + Highlight path */}
+        <div className="flex items-center space-x-2">
+          {onHighlightPath && trace.length > 0 && (
+            <button
+              type="button"
+              onClick={handleHighlightFullPath}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 shadow-sm"
+            >
+              Highlight full path in Workflow
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </button>
+          )}
+
+          {onJumpToAgent && trace.length > 0 && selectedStepIndex !== null && (
+            <button
+              type="button"
+              onClick={() => onJumpToAgent(trace[selectedStepIndex].agentId)}
+              className="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-800 shadow-sm"
+            >
+              Open in Workflow Builder
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Input + uitleg */}

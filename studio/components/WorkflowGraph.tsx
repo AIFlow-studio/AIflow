@@ -15,6 +15,8 @@ interface WorkflowGraphProps {
   onNodeClick?: (agentId: string) => void;
   selectedNodeId?: string | null;
   onLinkCreate?: (sourceId: string, targetId: string) => void;
+  highlightedNodeIds?: string[];
+  highlightedEdges?: { from: string; to: string }[];
 }
 
 const WorkflowGraph: React.FC<WorkflowGraphProps> = ({ 
@@ -27,7 +29,9 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     linkingSourceId,
     onNodeClick,
     selectedNodeId,
-    onLinkCreate
+    onLinkCreate,
+    highlightedNodeIds,
+    highlightedEdges,
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<any>(null);
@@ -77,7 +81,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     feMerge.append("feMergeNode").attr("in", "offsetBlur");
     feMerge.append("feMergeNode").attr("in", "SourceGraphic");
 
-    const createGlow = (id: string, color: string) => {
+    const createGlow = (id: string, _color: string) => {
         const f = defs.append("filter").attr("id", id).attr("height", "150%").attr("width", "150%").attr("x", "-25%").attr("y", "-25%");
         f.append("feGaussianBlur").attr("stdDeviation", 4.5).attr("result", "coloredBlur");
         const m = f.append("feMerge");
@@ -264,7 +268,6 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       })
       .on("contextmenu", (event: any, d: any) => {
           event.preventDefault();
-          const bbox = event.target.getBoundingClientRect();
           setContextMenu({
             x: event.clientX,
             y: event.clientY,
@@ -389,7 +392,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
     const createHoverBtn = (svgContent: string, title: string, onClick: (d: any) => void) => {
         actionContainer.append("xhtml:button")
             .attr("title", title)
-            .style("width", "24px").style("height", "24px").style("border-radius", "12px").style("background", "white").style("border", "1px solid #E2E8F0").style("color", " #475569").style("display", "flex").style("align-items", "center").style("justify-content", "center").style("cursor", "pointer").style("box-shadow", "0 2px 4px rgba(0,0,0,0.05)")
+            .style("width", "24px").style("height", "24px").style("border-radius", "12px").style("background", "white").style("border", "1px solid #E2E8F0").style("color", "#475569").style("display", "flex").style("align-items", "center").style("justify-content", "center").style("cursor", "pointer").style("box-shadow", "0 2px 4px rgba(0,0,0,0.05)")
             .html(svgContent)
             .on("click", (e: any, d: any) => { e.stopPropagation(); onClick(d); });
     };
@@ -432,30 +435,80 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       const svg = d3.select(svgRef.current);
       if (svg.empty()) return;
 
-      // Node rectangles / selection / linking (bestaand gedrag)
+      // Node rectangles: selection, linking mode, and optional path highlight
       svg.selectAll(".node-rect")
           .attr("stroke", (d: any) => {
-              if (selectedNodeId === d.id) return d.isTool ? "#D97706" : "#6366F1";
-              if (isLinkingMode) return d.id === linkingSourceId ? "#6366F1" : "#E2E8F0";
+              const isOnPath = Array.isArray(highlightedNodeIds) && highlightedNodeIds.includes(d.id);
+
+              if (selectedNodeId === d.id) {
+                  // Selected node always wins
+                  return d.isTool ? "#D97706" : "#6366F1";
+              }
+
+              if (isOnPath) {
+                  // Path-highlighted nodes get a stronger stroke
+                  return d.isTool ? "#F59E0B" : "#6366F1";
+              }
+
+              if (isLinkingMode) {
+                  return d.id === linkingSourceId ? "#6366F1" : "#E2E8F0";
+              }
+
               if (d.isTool) return "#F59E0B";
               return "#E2E8F0";
           })
-          .attr("stroke-width", (d: any) => (selectedNodeId === d.id || linkingSourceId === d.id) ? 4 : 1)
-          .style("filter", (d: any) => (selectedNodeId === d.id ? (d.isTool ? "url(#glow-amber)" : "url(#glow-indigo)") : "url(#drop-shadow)"));
+          .attr("stroke-width", (d: any) => {
+              const isOnPath = Array.isArray(highlightedNodeIds) && highlightedNodeIds.includes(d.id);
+
+              if (selectedNodeId === d.id) return 4;
+              if (isOnPath) return 3;
+              if (linkingSourceId === d.id) return 4;
+              return 1;
+          })
+          .style("filter", (d: any) => {
+              const isOnPath = Array.isArray(highlightedNodeIds) && highlightedNodeIds.includes(d.id);
+
+              if (selectedNodeId === d.id) {
+                  return d.isTool ? "url(#glow-amber)" : "url(#glow-indigo)";
+              }
+
+              if (isOnPath) {
+                  return "url(#glow-indigo)";
+              }
+
+              return "url(#drop-shadow)";
+          });
 
       svg.selectAll(".node-group").style("cursor", isLinkingMode ? "crosshair" : "grab");
 
-      // ✨ Extra juicy: highlight links rondom geselecteerde node / linking source
+      // Links: highlight either full path or local selection / linking
       svg.selectAll(".link-path")
         .attr("stroke", (d: any) => {
           const sourceId = (d.source as any)?.id ?? d.source;
           const targetId = (d.target as any)?.id ?? d.target;
 
+          const hasPath =
+            Array.isArray(highlightedEdges) && highlightedEdges.length > 0;
+
+          const isInPath = hasPath
+            ? highlightedEdges.some(
+                (e) => e.from === sourceId && e.to === targetId
+              )
+            : false;
+
           const isConnectedToSelected =
-            !!selectedNodeId && (sourceId === selectedNodeId || targetId === selectedNodeId);
+            !!selectedNodeId &&
+            (sourceId === selectedNodeId || targetId === selectedNodeId);
 
           const isFromLinkingSource =
-            !!isLinkingMode && !!linkingSourceId && sourceId === linkingSourceId;
+            !!isLinkingMode &&
+            !!linkingSourceId &&
+            sourceId === linkingSourceId;
+
+          if (hasPath) {
+            // When a full path is highlighted, prefer that
+            return isInPath ? "#6366F1" : "#E2E8F0";
+          }
 
           if (isLinkingMode && linkingSourceId) {
             return isFromLinkingSource ? "#6366F1" : "#E2E8F0";
@@ -471,11 +524,27 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           const sourceId = (d.source as any)?.id ?? d.source;
           const targetId = (d.target as any)?.id ?? d.target;
 
+          const hasPath =
+            Array.isArray(highlightedEdges) && highlightedEdges.length > 0;
+
+          const isInPath = hasPath
+            ? highlightedEdges.some(
+                (e) => e.from === sourceId && e.to === targetId
+              )
+            : false;
+
           const isConnectedToSelected =
-            !!selectedNodeId && (sourceId === selectedNodeId || targetId === selectedNodeId);
+            !!selectedNodeId &&
+            (sourceId === selectedNodeId || targetId === selectedNodeId);
 
           const isFromLinkingSource =
-            !!isLinkingMode && !!linkingSourceId && sourceId === linkingSourceId;
+            !!isLinkingMode &&
+            !!linkingSourceId &&
+            sourceId === linkingSourceId;
+
+          if (hasPath) {
+            return isInPath ? 3 : 1.5;
+          }
 
           if (isLinkingMode && linkingSourceId) {
             return isFromLinkingSource ? 3 : 1.5;
@@ -487,15 +556,31 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
           const sourceId = (d.source as any)?.id ?? d.source;
           const targetId = (d.target as any)?.id ?? d.target;
 
+          const hasPath =
+            Array.isArray(highlightedEdges) && highlightedEdges.length > 0;
+
+          const isInPath = hasPath
+            ? highlightedEdges.some(
+                (e) => e.from === sourceId && e.to === targetId
+              )
+            : false;
+
           const isConnectedToSelected =
-            !!selectedNodeId && (sourceId === selectedNodeId || targetId === selectedNodeId);
+            !!selectedNodeId &&
+            (sourceId === selectedNodeId || targetId === selectedNodeId);
 
           const isFromLinkingSource =
-            !!isLinkingMode && !!linkingSourceId && sourceId === linkingSourceId;
+            !!isLinkingMode &&
+            !!linkingSourceId &&
+            sourceId === linkingSourceId;
 
-          // Geen selectie / linking mode → alles normaal
-          if (!selectedNodeId && !isLinkingMode) {
+          // Geen selectie / linking mode / path → alles normaal
+          if (!selectedNodeId && !isLinkingMode && !hasPath) {
             return 1;
+          }
+
+          if (hasPath) {
+            return isInPath ? 1 : 0.25;
           }
 
           if (isLinkingMode && linkingSourceId) {
@@ -504,7 +589,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
 
           return isConnectedToSelected ? 1 : 0.35;
         });
-  }, [selectedNodeId, isLinkingMode, linkingSourceId]);
+  }, [selectedNodeId, isLinkingMode, linkingSourceId, highlightedNodeIds, highlightedEdges]);
 
   return (
     <div
