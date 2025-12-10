@@ -1,5 +1,8 @@
 # AIFLOW Studio
 
+![CI Status](https://github.com/AIFlow-studio/AIflow/actions/workflows/ci.yml/badge.svg)
+![Version](https://img.shields.io/badge/AIFLOW-v0.1.0-blue)
+
 **Visual AI Agent Workflows — Design · Run · Debug**
 
 AIFLOW is a visual + code-native framework for building multi‑agent AI workflows.
@@ -15,14 +18,33 @@ AIFLOW is built for developers who want **clear, debuggable multi‑agent system
 
 ---
 
+## 🌟 Current Stable Version
+
+**AIFLOW Standard:** v0.1 — *Open Standard Preview*  
+**Runtime & Studio:** v0.1.x  
+**Next Version:** v0.2 — currently in active development on `main`  
+
+For upcoming features (Condition Engine v0.2, Validator v0.2, Tools & Memory), see the  
+➡️ **Roadmap section in [`AIFLOW.md`](./AIFLOW.md)**
+
+---
+
+## 🔗 Links
+
+- 🧩 **Standard & Master Document:** [`AIFLOW.md`](./AIFLOW.md)  
+- 📘 **Spec folder:** [`./spec`](./spec)  
+- 🌐 **Docs & Website:** https://aiflow-studio.github.io/AIflow/  
+
+---
+
 ## ✨ What’s in this repo?
 
 This repository contains:
 
-- The **AIFLOW Standard v0.1** spec (`./AIFLOW.md`)
+- The **AIFLOW Standard v0.1** spec (`./AIFLOW.md` and `./spec/aiflow-v0.1.md`)
 - **AIFLOW Studio** (the web UI)
 - The **CLI runtime** for running `.aiflow` projects
-- The **condition engine**, **validator**, and **tools runtime**
+- The early **condition engine**, **validator**, and **tools runtime**
 - Example projects under `./examples`
 
 Everything is designed to be **git‑friendly**: flows, agents, prompts, tools and rules all live as files.
@@ -89,29 +111,31 @@ Copy that JSON, then:
 
 ## 🧠 Key Components
 
-### Condition Engine
+### Condition Engine (early v0.1)
 
-- Supports expressions like:  
-  - `ticket_type == 'billing'`  
-  - `contains(classification, 'Network')`  
-- Works with nested keys such as `output_agent1.ticket_type`  
-- Fully tested under `runtime/core/tests`
+An early expression engine for routing logic:
 
-### Flow Validator
+- Supports simple rule evaluation on context fields  
+- Used to decide which edge/agent to follow next in a flow  
+- A richer expression engine (nested keys, `contains()`, comparison operators) is being developed for v0.2  
 
-The validator checks that a `.aiflow` project is structurally sound:
+See `runtime/core` for the current implementation and tests.
 
-- All agents referenced in routes exist  
-- Conditions parse correctly  
-- Entry/exit points are well‑defined
+### Flow Validator (early v0.1)
 
-Validation is used both in the CLI and Studio to give early feedback on broken flows.
+The validator is the component that checks whether a `.aiflow` project is structurally sound.
+
+- Performs basic structural checks on flows and agents  
+- Integrates with the CLI and Studio to give early feedback on broken flows  
+- A more complete validator (including advanced condition and tools validation) is planned for v0.2+
 
 ### Tools Runtime
 
 - Central registry for tools defined in TypeScript  
 - Runs tools for a given agent step during a flow  
-- Makes tool input/output available in the agent context and trace
+- Makes tool input/output available in the agent context and trace  
+
+Tools become a first‑class part of the standard in upcoming versions.
 
 ---
 
@@ -121,7 +145,7 @@ The **Debug – CLI Trace Viewer** is designed to make multi‑agent behaviour u
 
 - See **Input Context**, **Parsed Output**, and **Evaluated Rules** per step  
 - Clearly marked **selected rule** and **next agent**  
-- Step badges (`STEP 0`, `STEP 1`, …) plus numbered markers in the graph  
+- Step badges (`STEP 0`, `STEP 1`, …) plus visual highlighting in the graph  
 - Full‑path highlighting across the workflow
 
 Instead of guessing why a route was taken, you can see exactly which condition fired.
@@ -134,7 +158,7 @@ Instead of guessing why a route was taken, you can see exactly which condition f
 core/              # Core runtime & spec helpers
 runtime/           # CLI runtime, condition engine, validator, tools runtime
 spec/              # AIFLOW Standard v0.x spec
-studio/            # Next.js/React app (AIFLOW Studio UI)
+studio/            # React app (AIFLOW Studio UI)
 examples/          # Example flows, including CustomerSupportFlow
 docs/screenshots/  # UI screenshots & marketing assets
 ```
@@ -144,7 +168,7 @@ docs/screenshots/  # UI screenshots & marketing assets
 ## 🛠 Tech Stack
 
 - **TypeScript / Node.js** – runtime & tooling  
-- **React / Next.js** – Studio UI  
+- **React** – Studio UI  
 - **Vitest** – tests for core logic and CLI  
 - **GitHub Actions** – CI for build and tests
 
@@ -157,7 +181,7 @@ Contributions are very welcome.
 - Found a bug or have an idea? → open an **Issue**  
 - Want to add an example flow or tool? → open a **Pull Request**  
 
-Please see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for details once that file is in place.
+A `CONTRIBUTING.md` will be added as the project matures.
 
 ---
 

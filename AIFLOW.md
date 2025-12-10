@@ -1,6 +1,11 @@
 # AIFLOW — Open Standard & Studio  
 *Masterdocument voor standaard, runtime, studio, website en roadmap*
 
+> **Version Notice (v0.1)**  
+> Dit document beschrijft de officiële AIFLOW Standard v0.1 (frozen).  
+> v0.2 wordt actief ontwikkeld op de `main` branch van de AIFLOW-repository (`AIFlow-studio/AIflow`).  
+
+
 ---
 
 ## 1. Visie & Positionering
@@ -29,9 +34,9 @@ AIFLOW moet zich voelen als:
 ### 2.1 Repos
 
 - **Studio + Runtime + Spec**  
-  `https://github.com/joetranga-wq/AIflow`
+  `https://github.com/AIFlow-studio/AIflow`
 - **Marketing website / docs hub**  
-  `https://github.com/joetranga-wq/AIflow-site`
+  `https://github.com/AIFlow-studio/AIflow-site`
 
 ### 2.2 Hoofdstructuur AIflow-repo
 
@@ -387,7 +392,7 @@ In deze sessie (en eerdere iteraties) is voor de website o.a. gedaan:
 
 ```bash
 # Studio & runtime
-git clone https://github.com/joetranga-wq/AIflow
+git clone https://github.com/AIFlow-studio/AIflow
 cd AIflow
 npm install
 
