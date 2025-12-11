@@ -636,7 +636,7 @@ const WorkflowGraph: React.FC<WorkflowGraphProps> = ({
       simulation.stop();
       simulationRef.current = null;
     };
-  }, [project.agents.length, project.flow.logic.length, project.flow.entry_agent]);
+    }, [project.agents, project.flow.logic, project.flow.entry_agent]);
 
   // --- React Effect for Selections/Mode/Validation/Edge selection ---
   useEffect(() => {

@@ -1,379 +1,331 @@
-// studio/components/ConditionDebuggerPanel.tsx
-import React from "react";
+import React from 'react';
+import { X } from 'lucide-react';
 
-// Self-contained types voor Condition Debugger
-
-export type ConditionResult = "true" | "false" | "error";
-
-export type TraceNodeType =
-  | "AND"
-  | "OR"
-  | "NOT"
-  | "COMPARE"
-  | "CALL"
-  | "LITERAL"
-  | "FIELD";
-
-export interface TraceError {
-  message: string;
-  code?: string;
-}
-
-export interface TraceNode {
-  id: string;
-  type: TraceNodeType;
-  operator?: string;
-  value?: unknown;
-  raw?: string;
-  children?: TraceNode[];
-  error?: TraceError;
-  shortCircuited?: boolean;
-}
-
-export interface ReferencedField {
-  path: string;
-  value: unknown;
-  sourceNodeId?: string;
-}
-
-export interface ConditionTrace {
-  conditionId: string;
-  runId?: string;
-  expression: string;
-  result: ConditionResult;
-  root: TraceNode;
-  referencedFields: ReferencedField[];
-  expressionWithValues?: string;
-  reasonText?: string;
-}
-
-// Helper functies
-
-function isTruthy(value: unknown): boolean {
-  return value === true;
-}
-
-function nodeResultLabel(node: TraceNode): string {
-  if (node.shortCircuited) return "Not evaluated (short-circuited)";
-  if (node.error) return "Error";
-  if (typeof node.value === "boolean") {
-    return node.value ? "TRUE" : "FALSE";
-  }
-  if (node.value === undefined) return "Unknown";
-  try {
-    return JSON.stringify(node.value);
-  } catch {
-    return String(node.value);
-  }
-}
-
-function generateFallbackReason(trace: ConditionTrace): string {
-  if (trace.result === "error") {
-    return "De rule heeft een error veroorzaakt tijdens evaluatie.";
-  }
-
-  const trueLeafs: TraceNode[] = [];
-  const falseLeafs: TraceNode[] = [];
-  const errored: TraceNode[] = [];
-
-  function visit(node: TraceNode) {
-    if (node.error) {
-      errored.push(node);
-      return;
-    }
-    if (!node.children || node.children.length === 0) {
-      if (node.value === true) trueLeafs.push(node);
-      else if (node.value === false) falseLeafs.push(node);
-      return;
-    }
-    node.children.forEach(visit);
-  }
-
-  visit(trace.root);
-
-  if (trace.result === "true") {
-    const firstTrue = trueLeafs[0];
-    if (firstTrue?.raw) {
-      return `De rule is TRUE omdat '${firstTrue.raw}' waar is in deze context.`;
-    }
-    return "De rule is TRUE op basis van de huidige data.";
-  } else {
-    const firstFalse = falseLeafs[0];
-    if (firstFalse?.raw) {
-      return `De rule is FALSE omdat '${firstFalse.raw}' niet waar is in deze context.`;
-    }
-    return "De rule is FALSE op basis van de huidige data.";
-  }
-}
-
-type ConditionDebuggerPanelProps = {
-  trace: ConditionTrace | null;
+interface ConditionDebuggerPanelProps {
+  trace: any;
   onClose?: () => void;
-};
+}
+
+// Helper: alle veldpaden uit de context verzamelen, b.v. ticket.type, customer.age
+function collectFieldPaths(obj: any, prefix = ''): string[] {
+  if (obj == null || typeof obj !== 'object') return [];
+  const paths: string[] = [];
+
+  for (const key of Object.keys(obj)) {
+    const full = prefix ? `${prefix}.${key}` : key;
+    paths.push(full);
+    paths.push(...collectFieldPaths(obj[key], full));
+  }
+
+  return paths;
+}
+
+// Heel simpele suggestie: vervang "_" door "." en kijk of het bestaat.
+// Later kunnen we dit uitbreiden met fuzzy matching / levenshtein.
+function findFieldSuggestion(
+  unknownPath: string,
+  availablePaths: string[]
+): string | null {
+  const dotVariant = unknownPath.replace(/_/g, '.');
+  if (availablePaths.includes(dotVariant)) return dotVariant;
+  return null;
+}
 
 export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
   trace,
   onClose,
 }) => {
-  if (!trace) {
+  if (!trace) return null;
+
+  const result = trace.result;
+  const expression = trace.expression;
+  const expressionWithValues = trace.expressionWithValues;
+  const root = trace.root;
+  const referencedFields: { path: string; value: any }[] =
+    trace.referencedFields ?? [];
+
+  const debugContext = trace.debugContext ?? null;
+  const availablePaths = debugContext ? collectFieldPaths(debugContext) : [];
+
+  const unknownFields = referencedFields.filter(
+    (f) => typeof f.value === 'undefined'
+  );
+
+  const unknownWithSuggestions = unknownFields.map((f) => {
+    const suggestion = availablePaths.length
+      ? findFieldSuggestion(f.path, availablePaths)
+      : null;
+    return { ...f, suggestion };
+  });
+
+  const statusLabel =
+    result === true ? 'TRUE' : result === false ? 'FALSE' : 'ERROR';
+  const statusColorClasses =
+    result === true
+      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+      : result === false
+      ? 'bg-rose-50 text-rose-700 border-rose-200'
+      : 'bg-amber-50 text-amber-700 border-amber-200';
+
+  const statusDotClasses =
+    result === true
+      ? 'bg-emerald-500'
+      : result === false
+      ? 'bg-rose-500'
+      : 'bg-amber-500';
+
+  const statusText =
+    result === true
+      ? 'Why is this rule TRUE?'
+      : result === false
+      ? 'Why is this rule FALSE?'
+      : 'Why is this rule ERROR?';
+
+  const explanationText =
+    result === true
+      ? 'De rule is TRUE op basis van de huidige data.'
+      : result === false
+      ? 'De rule is FALSE op basis van de huidige data.'
+      : 'De rule kon niet correct geëvalueerd worden (bijvoorbeeld door een onbekend veld of typefout).';
+
+  const renderNode = (node: any): React.ReactNode => {
+    if (!node) return <></>;
+
+    const isError = node.type === 'ERROR';
+    const isShortCircuited = node.shortCircuited;
+
+    const label =
+      node.type === 'BINARY'
+        ? node.operator
+        : node.type === 'UNARY'
+        ? node.operator
+        : node.type === 'FIELD'
+        ? node.raw
+        : node.type === 'ARRAY'
+        ? 'ARRAY'
+        : node.type;
+
+    const valueLabel =
+      typeof node.value === 'boolean'
+        ? node.value
+          ? 'TRUE'
+          : 'FALSE'
+        : node.value === null
+        ? 'null'
+        : typeof node.value === 'undefined'
+        ? 'undefined'
+        : JSON.stringify(node.value);
+
+    const badgeColor =
+      typeof node.value === 'boolean'
+        ? node.value
+          ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+          : 'bg-rose-100 text-rose-700 border-rose-200'
+        : isError
+        ? 'bg-amber-100 text-amber-800 border-amber-200'
+        : 'bg-slate-100 text-slate-700 border-slate-200';
+
+    const typeLabel =
+      node.type === 'BINARY'
+        ? 'BINARY'
+        : node.type === 'UNARY'
+        ? 'UNARY'
+        : node.type === 'FIELD'
+        ? 'FIELD'
+        : node.type === 'ARRAY'
+        ? 'ARRAY'
+        : node.type === 'LITERAL'
+        ? 'LITERAL'
+        : node.type;
+
     return (
-      <div className="h-full flex items-center justify-center text-sm text-gray-500">
-        Geen rule geselecteerd.
+      <div className="border border-slate-200 rounded-xl p-3 mb-2 bg-white">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-[0.12em] bg-slate-50 text-slate-500 border border-slate-200">
+              {typeLabel}
+            </span>
+            {node.operator && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-900 text-slate-50">
+                {node.operator}
+              </span>
+            )}
+            {isShortCircuited && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 text-[10px]">
+                Short-circuited
+              </span>
+            )}
+            {isError && node.error && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 text-[10px]">
+                {node.error}
+              </span>
+            )}
+          </div>
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border ${badgeColor}`}
+          >
+            {valueLabel}
+          </span>
+        </div>
+        <div className="text-[11px] font-mono text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 mb-2">
+          {node.raw}
+        </div>
+        {Array.isArray(node.children) && node.children.length > 0 && (
+          <div className="mt-2 pl-3 border-l border-slate-200 space-y-2">
+            {node.children.map((child: any) => (
+              <div key={child.id}>{renderNode(child)}</div>
+            ))}
+          </div>
+        )}
       </div>
     );
-  }
-
-  const badgeColor =
-    trace.result === "true"
-      ? "bg-green-100 text-green-800 border-green-300"
-      : trace.result === "false"
-      ? "bg-red-100 text-red-800 border-red-300"
-      : "bg-yellow-100 text-yellow-800 border-yellow-300";
-
-  const badgeLabel =
-    trace.result === "true"
-      ? "TRUE"
-      : trace.result === "false"
-      ? "FALSE"
-      : "ERROR";
-
-  const reason = trace.reasonText ?? generateFallbackReason(trace);
+  };
 
   return (
-    <div className="flex flex-col h-full border-l border-gray-200 bg-white">
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
         <div className="flex flex-col">
-          <div className="text-xs uppercase tracking-wide text-gray-400">
+          <span className="text-[10px] font-semibold tracking-[0.16em] text-slate-400 uppercase">
             Condition Debugger
-          </div>
-          <div className="text-sm font-medium text-gray-900">
-            Why is this rule {badgeLabel}?
-          </div>
+          </span>
+          <span className="text-xs text-slate-500">{statusText}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span
-            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${badgeColor}`}
+          <div
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border ${statusColorClasses}`}
           >
-            {badgeLabel}
-          </span>
+            <span className={`w-1.5 h-1.5 rounded-full ${statusDotClasses}`} />
+            {statusLabel}
+          </div>
           {onClose && (
             <button
               onClick={onClose}
-              className="rounded-md p-1 hover:bg-gray-100 text-gray-400 hover:text-gray-600"
-              aria-label="Close condition debugger"
+              className="p-1 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
             >
-              ×
+              <X className="w-3 h-3" />
             </button>
           )}
         </div>
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-auto px-4 py-3 space-y-4">
+      <div className="flex-1 overflow-auto p-4 space-y-4 text-xs text-slate-700">
         {/* Expression */}
-        <section className="space-y-2">
-          <div className="text-xs font-semibold text-gray-500">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">
             Rule expression
           </div>
-          <pre className="whitespace-pre-wrap text-xs font-mono bg-gray-50 border border-gray-200 rounded-md px-2 py-2 text-gray-800">
-            {trace.expression}
-          </pre>
-
-          {trace.expressionWithValues && (
-            <>
-              <div className="text-xs font-semibold text-gray-500">
-                With values
-              </div>
-              <pre className="whitespace-pre-wrap text-xs font-mono bg-indigo-50 border border-indigo-100 rounded-md px-2 py-2 text-gray-900">
-                {trace.expressionWithValues}
-              </pre>
-            </>
-          )}
-        </section>
-
-        {/* Why? */}
-        <section className="space-y-1">
-          <div className="text-xs font-semibold text-gray-500">
-            Why is this rule {badgeLabel}?
+          <div className="text-[11px] font-mono bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 overflow-x-auto">
+            {expression}
           </div>
-          <p className="text-xs text-gray-800 leading-relaxed">{reason}</p>
-        </section>
+        </div>
+
+        {/* Expression with values */}
+        {expressionWithValues && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">
+              With values
+            </div>
+            <div className="text-[11px] font-mono bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 text-slate-800 overflow-x-auto">
+              {expressionWithValues}
+            </div>
+          </div>
+        )}
+
+        {/* Explanation */}
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">
+            Why is this rule {statusLabel}?
+          </div>
+          <p className="text-[11px] text-slate-700">{explanationText}</p>
+        </div>
 
         {/* Explain tree */}
-        <section className="space-y-2">
-          <div className="text-xs font-semibold text-gray-500">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">
             Explain tree
           </div>
-          <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-2 text-xs">
-            <TraceTree node={trace.root} depth={0} />
-          </div>
-        </section>
+          {renderNode(root)}
+        </div>
 
-        {/* Data sources */}
-        {trace.referencedFields.length > 0 && (
-          <section className="space-y-2">
-            <div className="text-xs font-semibold text-gray-500">
+        {/* Data used in this rule */}
+        {!!referencedFields.length && (
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">
               Data used in this rule
             </div>
-            <div className="rounded-md border border-gray-200 bg-white max-h-40 overflow-auto">
-              <table className="min-w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 text-gray-500">
-                    <th className="text-left px-2 py-1 font-medium">
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full text-[11px]">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="text-left px-3 py-1.5 font-medium border-b border-slate-200">
                       Field
                     </th>
-                    <th className="text-left px-2 py-1 font-medium">
+                    <th className="text-left px-3 py-1.5 font-medium border-b border-slate-200">
                       Value
-                    </th>
-                    <th className="text-left px-2 py-1 font-medium">
-                      Source node
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {trace.referencedFields.map((f) => (
-                    <tr key={f.path} className="border-t border-gray-100">
-                      <td className="px-2 py-1 font-mono text-[11px] text-gray-700">
+                  {referencedFields.map((f, idx) => (
+                    <tr key={idx} className="border-b border-slate-100 last:border-b-0">
+                      <td className="px-3 py-1.5 font-mono text-slate-700">
                         {f.path}
                       </td>
-                      <td className="px-2 py-1 text-gray-900">
-                        <ValuePreview value={f.value} />
-                      </td>
-                      <td className="px-2 py-1 text-gray-500">
-                        {f.sourceNodeId ?? "—"}
+                      <td className="px-3 py-1.5 text-slate-700">
+                        {typeof f.value === 'undefined'
+                          ? 'undefined'
+                          : JSON.stringify(f.value)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
+          </div>
+        )}
+
+        {/* Potential field issues / suggestions */}
+        {!!unknownWithSuggestions.length && (
+          <div className="mt-2">
+            <div className="text-[10px] uppercase tracking-[0.16em] text-amber-600 mb-1">
+              Potential field issues
+            </div>
+            <div className="space-y-1.5">
+              {unknownWithSuggestions.map((f, idx) => (
+                <div
+                  key={idx}
+                  className="text-[11px] bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 text-amber-800"
+                >
+                  <div>
+                    Unknown field{' '}
+                    <span className="font-mono font-semibold">
+                      {f.path}
+                    </span>{' '}
+                    (value is{' '}
+                    <span className="font-mono">undefined</span>).
+                  </div>
+                  {f.suggestion ? (
+                    <div className="mt-0.5">
+                      Maybe you meant{' '}
+                      <span className="font-mono font-semibold">
+                        {f.suggestion}
+                      </span>
+                      ?
+                    </div>
+                  ) : (
+                    <div className="mt-0.5">
+                      This field is not present in the available data for this
+                      rule.
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>
   );
-};
-
-// ========== Subcomponents ==========
-
-type TraceTreeProps = {
-  node: TraceNode;
-  depth: number;
-};
-
-const TraceTree: React.FC<TraceTreeProps> = ({ node, depth }) => {
-  const hasChildren = !!node.children && node.children.length > 0;
-  const isBool =
-    typeof node.value === "boolean" ||
-    node.value === true ||
-    node.value === false;
-
-  const pillBase =
-    "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold border";
-
-  const pillClass = node.error
-    ? `${pillBase} bg-yellow-100 text-yellow-800 border-yellow-300`
-    : isBool
-    ? isTruthy(node.value)
-      ? `${pillBase} bg-green-100 text-green-800 border-green-300`
-      : `${pillBase} bg-red-100 text-red-800 border-red-300`
-    : `${pillBase} bg-gray-100 text-gray-700 border-gray-300`;
-
-  const label = nodeResultLabel(node);
-
-  return (
-    <div>
-      <div className="flex items-start gap-2">
-        {/* Indent */}
-        <div
-          style={{ width: depth * 12 }}
-          className="flex-shrink-0"
-          aria-hidden
-        />
-        {/* Content */}
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className={pillClass}>{label}</span>
-            {node.operator && (
-              <span className="text-[10px] uppercase tracking-wide text-gray-400">
-                {node.type} ({node.operator})
-              </span>
-            )}
-            {!node.operator && (
-              <span className="text-[10px] uppercase tracking-wide text-gray-400">
-                {node.type}
-              </span>
-            )}
-            {node.shortCircuited && (
-              <span className="text-[10px] text-gray-400">
-                · short-circuited
-              </span>
-            )}
-          </div>
-          {node.raw && (
-            <div className="mt-0.5 text-[11px] font-mono text-gray-800">
-              {node.raw}
-            </div>
-          )}
-          {node.error && (
-            <div className="mt-0.5 text-[11px] text-yellow-800">
-              {node.error.message}
-            </div>
-          )}
-        </div>
-      </div>
-      {hasChildren && (
-        <div className="mt-1 space-y-1">
-          {node.children!.map((child) => (
-            <TraceTree key={child.id} node={child} depth={depth + 1} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const ValuePreview: React.FC<{ value: unknown }> = ({ value }) => {
-  if (value === null) return <span className="text-gray-500">null</span>;
-  if (value === undefined)
-    return <span className="text-gray-400">undefined</span>;
-  if (typeof value === "string") {
-    if (value.length > 40) {
-      return (
-        <span className="font-mono text-[11px] text-gray-800">
-          "{value.slice(0, 37)}..."
-        </span>
-      );
-    }
-    return (
-      <span className="font-mono text-[11px] text-gray-800">"{value}"</span>
-    );
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return (
-      <span className="font-mono text-[11px] text-gray-800">
-        {String(value)}
-      </span>
-    );
-  }
-  try {
-    const json = JSON.stringify(value);
-    if (json.length > 40) {
-      return (
-        <span className="font-mono text-[11px] text-gray-800">
-          {json.slice(0, 37)}...
-        </span>
-      );
-    }
-    return (
-      <span className="font-mono text-[11px] text-gray-800">{json}</span>
-    );
-  } catch {
-    return (
-      <span className="font-mono text-[11px] text-gray-800">
-        {String(value)}
-      </span>
-    );
-  }
 };

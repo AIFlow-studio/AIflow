@@ -10,6 +10,7 @@ import DebugTraceView from './components/DebugTraceView';
 import ValidationPanel from './components/ValidationPanel';
 import { ConditionDebuggerPanel } from './components/ConditionDebuggerPanel';
 import { RuleInspectorPanel } from './components/RuleInspectorPanel';
+import { evaluateConditionWithTrace, buildAutoContextForExpression } from './runtime/conditionEngineV2';
 import { validateProject, hasValidationErrors, ValidationIssue } from '../runtime/core/validator';
 
 import { WorkflowRunner, LogEntry } from '../runtime/browser/WorkflowRunner';
@@ -211,6 +212,7 @@ const [isLinkingMode, setIsLinkingMode] = useState(false);
     setCurrentView(ViewState.WORKFLOW);
   };
 
+
   // 👉 Wanneer een edge (logic link) in de graph wordt aangeklikt
 const handleSelectLogicLinkFromGraph = (linkId: string) => {
   setSelectedLogicLinkId(linkId);
@@ -230,7 +232,8 @@ const handleSelectLogicLinkFromGraph = (linkId: string) => {
 };
 
 
-  // Condition Debugger – vanuit een geselecteerde link (edge)
+ // Condition Debugger – vanuit een geselecteerde link (edge)
+// Nu via ConditionEngine v2 met echte evaluatie + trace.
 const handleDebugRuleFromLink = (link: any) => {
   if (!link) return;
 
@@ -246,25 +249,45 @@ const handleDebugRuleFromLink = (link: any) => {
     setSelectedAgentId(fromAgent.id);
   }
 
-  // 📌 3. Bouw een simpele ConditionTrace (preview)
-  const trace = {
+  // 📌 3. Bouw een design-time context om de rule mee te evalueren
+  const context = buildAutoContextForExpression(expression);
+
+  // 📌 4. Laat ConditionEngine v2 de rule echt evalueren + trace genereren
+  let trace: any;
+  try {
+    trace = evaluateConditionWithTrace(expression, context);
+  } catch (err: any) {
+    // Fallback: als er een parse/eval error is, toon die als error-node
+    trace = {
+      conditionId: link.id || 'edge',
+      runId: 'design-preview',
+      expression,
+      expressionWithValues: expression,
+      result: null,
+      root: {
+        id: 'root',
+        type: 'ERROR',
+        raw: expression,
+        value: null,
+        children: [],
+        error: err?.message || 'Failed to evaluate condition',
+      },
+      referencedFields: [],
+    };
+  }
+
+  // 📌 5. ConditionDebuggerPanel verwacht conditionId/runId – die overschrijven we
+  //     én we geven de gebruikte context mee als debugContext voor field-suggesties.
+  const enrichedTrace = {
+    ...trace,
     conditionId: link.id || 'edge',
     runId: 'design-preview',
-    expression,
-    result: 'true' as const,
-    root: {
-      id: 'root',
-      type: 'LITERAL',
-      value: true,
-      raw: expression,
-      children: [],
-    },
-    referencedFields: [],
-    expressionWithValues: expression,
+    debugContext: context,
   };
 
-  setSelectedConditionTrace(trace);
+  setSelectedConditionTrace(enrichedTrace);
 };
+
 
 
 
@@ -611,17 +634,46 @@ const handleDebugRuleFromLink = (link: any) => {
       setSelectedAgentId(null);
   };
 
-  const saveCondition = () => {
-    if (!editingLink) return;
-    const updatedLogic = project.flow.logic.map(l => {
-        if (l.id === editingLink.id) {
-            return { ...l, condition: editingLink.condition, mapping: editingLink.mapping };
+        const saveCondition = () => {
+        if (!editingLink) return;
+
+        // 1) Mapping netjes als JSON-parsed object opslaan (of undefined)
+        let parsedMapping: any = undefined;
+        if (editingLink.mapping && editingLink.mapping.trim() !== '') {
+            try {
+            parsedMapping = JSON.parse(editingLink.mapping);
+            } catch (err) {
+            // Hier kun je later nog een nette toast of error state van maken
+            console.error('Invalid JSON in data mapping:', err);
+            alert('Data mapping is geen geldige JSON. Controleer het even.');
+            return;
+            }
         }
-        return l;
-    });
-    updateProject({ ...project, flow: { ...project.flow, logic: updatedLogic } });
-    setEditingLink(null);
-  };
+
+        // 2) Condition mag ALLES zijn wat onze ConditionEngine v2 aankan
+        const updatedLogic = (project.flow.logic || []).map((l: any) => {
+            if (l.id === editingLink.id) {
+            return {
+                ...l,
+                condition: editingLink.condition, // bijv. ticket.type == 'technical'
+                mapping: parsedMapping,          // als object opgeslagen
+            };
+            }
+            return l;
+        });
+
+        // 3) Project updaten
+        updateProject({
+            ...project,
+            flow: {
+            ...project.flow,
+            logic: updatedLogic,
+            },
+        });
+
+        // 4) Modal sluiten
+        setEditingLink(null);
+        };
 
   // --- Tool Templates Logic ---
   const handleApplyTemplate = (templateKey: string) => {
