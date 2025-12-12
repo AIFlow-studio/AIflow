@@ -11,8 +11,8 @@ import ValidationPanel from './components/ValidationPanel';
 import { ConditionDebuggerPanel } from './components/ConditionDebuggerPanel';
 import { RuleInspectorPanel } from './components/RuleInspectorPanel';
 import { evaluateConditionWithTrace, buildAutoContextForExpression } from './runtime/conditionEngineV2';
+import { autoRewriteExpression } from './runtime/autoRewriteExpression';
 import { validateProject, hasValidationErrors, ValidationIssue } from '../runtime/core/validator';
-
 import { WorkflowRunner, LogEntry } from '../runtime/browser/WorkflowRunner';
 import { ViewState, AIFlowProject, Agent, ToolDefinition } from '../core/types';
 import { INITIAL_PROJECT, MARKETING_PROJECT, TOOL_TEMPLATES } from '../core/constants';
@@ -213,85 +213,183 @@ const [isLinkingMode, setIsLinkingMode] = useState(false);
   };
 
 
-  // 👉 Wanneer een edge (logic link) in de graph wordt aangeklikt
-const handleSelectLogicLinkFromGraph = (linkId: string) => {
-  setSelectedLogicLinkId(linkId);
+    // 👉 Wanneer een edge (logic link) in de graph wordt aangeklikt
+  const handleSelectLogicLinkFromGraph = (linkId: string) => {
+    setSelectedLogicLinkId(linkId);
 
-  // Zoek de bijbehorende link in het project
-  const link = (project.flow.logic as any[]).find((l) => l.id === linkId);
-  if (!link) return;
+    // Zoek de bijbehorende link in het project
+    const link = (project.flow.logic as any[]).find((l) => l.id === linkId);
+    if (!link) return;
 
-  // Selecteer de FROM-agent zodat rechts de juiste Agent Configuration zichtbaar is
-  const fromAgent = project.agents.find((a) => a.id === link.from);
-  if (fromAgent) {
-    setSelectedAgentId(fromAgent.id);
+    // Selecteer de FROM-agent zodat rechts de juiste Agent Configuration zichtbaar is
+    const fromAgent = project.agents.find((a) => a.id === link.from);
+    if (fromAgent) {
+      setSelectedAgentId(fromAgent.id);
+    }
+
+    // Zorg dat we in de Workflow view zitten
+    setCurrentView(ViewState.WORKFLOW);
+  };
+
+  // Haal alle veldpaden op uit een genest context-object, bv.
+// { ticket: { type: "technical", priority: "high" } }
+//  -> ["ticket", "ticket.type", "ticket.priority"]
+const collectFieldPathsForContext = (obj: any, prefix = ''): string[] => {
+  if (obj == null || typeof obj !== 'object') return [];
+  const paths: string[] = [];
+
+  for (const key of Object.keys(obj)) {
+    const full = prefix ? `${prefix}.${key}` : key;
+    paths.push(full);
+    paths.push(...collectFieldPathsForContext(obj[key], full));
   }
 
-  // Zorg dat we in de Workflow view zitten
-  setCurrentView(ViewState.WORKFLOW);
+  return paths;
 };
-
-
- // Condition Debugger – vanuit een geselecteerde link (edge)
-// Nu via ConditionEngine v2 met echte evaluatie + trace.
+// Condition Debugger – edge debugging with AutoRewrite PREPASS
 const handleDebugRuleFromLink = (link: any) => {
   if (!link) return;
 
-  const expression = link.condition || String(link.label || 'true');
+  const expression = link.condition || String(link.label || "true");
 
-  // 📌 1. Zorg dat we in de Workflow view zitten
+  // Always jump to workflow view
   setCurrentView(ViewState.WORKFLOW);
 
-  // 📌 2. Selecteer de "FROM" agent van deze edge,
-  // zodat het Agent Configuration-paneel klopt.
+  // Select FROM agent for UI accuracy
   const fromAgent = project.agents.find((a) => a.id === link.from);
   if (fromAgent) {
     setSelectedAgentId(fromAgent.id);
   }
 
-  // 📌 3. Bouw een design-time context om de rule mee te evalueren
+  // 1) Build debug context (design-time auto context)
   const context = buildAutoContextForExpression(expression);
 
-  // 📌 4. Laat ConditionEngine v2 de rule echt evalueren + trace genereren
+  // 2) Discover canonical field paths
+  const collectFieldPaths = (obj: any, prefix = ''): string[] => {
+    if (obj == null || typeof obj !== 'object') return [];
+    const paths: string[] = [];
+    for (const key of Object.keys(obj)) {
+      const full = prefix ? `${prefix}.${key}` : key;
+      paths.push(full);
+      paths.push(...collectFieldPaths(obj[key], full));
+    }
+    return paths;
+  };
+
+  const allPaths = collectFieldPaths(context);
+  const uniquePaths = Array.from(new Set(allPaths));
+
+  const knownFields = uniquePaths.map((p) => {
+    const last = p.split('.').pop()!;
+    return {
+      id: p,
+      path: p,                     // canonical version
+      label: p,
+      aliases: [
+        p,                         // canonical
+        p.replace(/\./g, "_"),     // snake_case
+        last,                      // short field name
+      ],
+    };
+  });
+
+  // 3) AutoRewrite PREPASS — happens BEFORE evaluation
+  try {
+    const rewrite = autoRewriteExpression(expression, knownFields);
+    if (rewrite) {
+      // Deliver rewrite result directly to debugger
+      setSelectedConditionTrace({
+        conditionId: link.id || "edge",
+        runId: "design-preview",
+        expression: rewrite.original,
+        rewrittenExpression: rewrite.rewritten,
+        autoRewrite: rewrite,
+        debugContext: context,
+        result: null,
+        referencedFields: [],
+        root: {
+          id: "root",
+          type: "ERROR",
+          raw: rewrite.original,
+          value: null,
+          children: [],
+          error: "Rule contains invalid or unknown fields (AutoFix available).",
+        },
+      });
+      return; // STOP HERE — show autofix instead of parsing error
+    }
+  } catch (err) {
+    console.warn("AutoRewrite PREPASS failed:", err);
+  }
+
+  // 4) Normal ConditionEngine evaluation if no rewrite
   let trace: any;
   try {
     trace = evaluateConditionWithTrace(expression, context);
   } catch (err: any) {
-    // Fallback: als er een parse/eval error is, toon die als error-node
     trace = {
-      conditionId: link.id || 'edge',
-      runId: 'design-preview',
+      conditionId: link.id || "edge",
+      runId: "design-preview",
       expression,
       expressionWithValues: expression,
       result: null,
+      referencedFields: [],
       root: {
-        id: 'root',
-        type: 'ERROR',
+        id: "root",
+        type: "ERROR",
         raw: expression,
         value: null,
         children: [],
-        error: err?.message || 'Failed to evaluate condition',
+        error: err?.message || "Failed to evaluate condition",
       },
-      referencedFields: [],
     };
   }
 
-  // 📌 5. ConditionDebuggerPanel verwacht conditionId/runId – die overschrijven we
-  //     én we geven de gebruikte context mee als debugContext voor field-suggesties.
-  const enrichedTrace = {
+  // Add debug context regardless
+  setSelectedConditionTrace({
     ...trace,
-    conditionId: link.id || 'edge',
-    runId: 'design-preview',
     debugContext: context,
-  };
-
-  setSelectedConditionTrace(enrichedTrace);
+  });
 };
 
 
+  // 👉 Auto-fix uit Condition Debugger toepassen op de echte rule
+  const handleApplyRuleRewrite = (rewrittenExpression: string) => {
+    if (!selectedConditionTrace) return;
+
+    const linkId = selectedConditionTrace.conditionId as string | undefined;
+    if (!linkId) return;
+
+    // Update de rule in flow.logic
+    const updatedLogic = (project.flow.logic || []).map((l: any) => {
+      if (l.id === linkId) {
+        return {
+          ...l,
+          condition: rewrittenExpression, // nieuwe rule
+        };
+      }
+      return l;
+    });
+
+    updateProject({
+      ...project,
+      flow: {
+        ...project.flow,
+        logic: updatedLogic,
+      },
+    });
+
+    // Debugger direct updaten zodat UI meteen klopt
+    setSelectedConditionTrace({
+      ...selectedConditionTrace,
+      expression: rewrittenExpression,
+      expressionWithValues: rewrittenExpression,
+    });
+  };
 
 
   // --- Helpers ---
+
 
   const updateProject = (newProject: AIFlowProject, transient = false) => {
     setSessions(prev => prev.map(s => {
@@ -1155,14 +1253,16 @@ const handleDebugRuleFromLink = (link: any) => {
                         )}
 
                         {/* Condition Debugger – toont uitleg waarom TRUE/FALSE */}
-                        {selectedConditionTrace && (
-                            <div className="flex-1 min-h-[260px]">
-                            <ConditionDebuggerPanel
-                                trace={selectedConditionTrace}
-                                onClose={() => setSelectedConditionTrace(null)}
-                            />
-                            </div>
-                        )}
+                                        {selectedConditionTrace && (
+                                        <div className="flex-1 min-h-[260px]">
+                                            <ConditionDebuggerPanel
+                                            trace={selectedConditionTrace}
+                                            onClose={() => setSelectedConditionTrace(null)}
+                                            onApplyRewrite={handleApplyRuleRewrite}
+                                            />
+                                        </div>
+                                        )}
+
                         </div>
                     )}
                 </div>

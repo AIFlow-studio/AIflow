@@ -1,13 +1,24 @@
 import React from 'react';
 import { X } from 'lucide-react';
+import {
+  autoRewriteExpression,
+  type KnownField,
+} from '../runtime/autoRewriteExpression';
 
 interface ConditionDebuggerPanelProps {
   trace: any;
   onClose?: () => void;
+  onApplyRewrite?: (rewrittenExpression: string) => void;
 }
 
-// Helper: alle veldpaden uit de context verzamelen, b.v. ticket.type, customer.age
-function collectFieldPaths(obj: any, prefix = ''): string[] {
+// 🔧 Canonical field helpers (C-fix)
+//
+// 1) Flatten debugContext → ["ticket.type", "ticket.priority", ...]
+// 2) Canonicaliseer snake_case → dot.notation
+//    - "ticket_type" → "ticket.type"
+//    - "ticket_priority" → "ticket.priority"
+// 3) Bouw KnownField[] waar .path altijd canonical is
+const collectFieldPaths = (obj: any, prefix = ''): string[] => {
   if (obj == null || typeof obj !== 'object') return [];
   const paths: string[] = [];
 
@@ -18,37 +29,84 @@ function collectFieldPaths(obj: any, prefix = ''): string[] {
   }
 
   return paths;
-}
+};
 
-// Heel simpele suggestie: vervang "_" door "." en kijk of het bestaat.
-// Later kunnen we dit uitbreiden met fuzzy matching / levenshtein.
-function findFieldSuggestion(
+const buildKnownFieldsFromPaths = (paths: string[]): KnownField[] => {
+  const unique = Array.from(new Set(paths));
+
+  return unique.map((originalPath) => {
+    // Canonical: als er underscores zijn maar geen dots, interpreteren we dat als dot-notation
+    // "ticket_type" → "ticket.type"
+    const isSnakeOnly =
+      originalPath.includes('_') && !originalPath.includes('.');
+    const canonicalPath = isSnakeOnly
+      ? originalPath.replace(/_/g, '.')
+      : originalPath;
+
+    const last = canonicalPath.split('.').pop() || canonicalPath;
+    const underscoreVariant = canonicalPath.replace(/\./g, '_');
+
+    const aliases = Array.from(
+      new Set(
+        [
+          canonicalPath,
+          originalPath, // raw uit context
+          underscoreVariant,
+          last,
+        ].filter(Boolean),
+      ),
+    );
+
+    return {
+      id: canonicalPath,
+      path: canonicalPath,
+      label: canonicalPath,
+      aliases,
+    };
+  });
+};
+
+// Tiny helper: probeer onbekend veld te mappen naar bestaande path
+const findFieldSuggestion = (
   unknownPath: string,
-  availablePaths: string[]
-): string | null {
-  const dotVariant = unknownPath.replace(/_/g, '.');
-  if (availablePaths.includes(dotVariant)) return dotVariant;
+  availablePaths: string[],
+): string | null => {
+  // snake_case → dots
+  if (unknownPath.includes('_') && !unknownPath.includes('.')) {
+    const dotVariant = unknownPath.replace(/_/g, '.');
+    const match = availablePaths.find((p) => p === dotVariant);
+    if (match) return match;
+  }
   return null;
-}
+};
 
-export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
-  trace,
-  onClose,
-}) => {
+export const ConditionDebuggerPanel: React.FC<
+  ConditionDebuggerPanelProps
+> = ({ trace, onClose, onApplyRewrite }) => {
   if (!trace) return null;
 
+  const expression = trace.expression as string;
+  const expressionWithValues = trace.expressionWithValues as string;
   const result = trace.result;
-  const expression = trace.expression;
-  const expressionWithValues = trace.expressionWithValues;
   const root = trace.root;
   const referencedFields: { path: string; value: any }[] =
     trace.referencedFields ?? [];
 
+  // 🔍 Canonical veldinformatie uit debugContext
   const debugContext = trace.debugContext ?? null;
   const availablePaths = debugContext ? collectFieldPaths(debugContext) : [];
+  const knownFields = availablePaths.length
+    ? buildKnownFieldsFromPaths(availablePaths)
+    : [];
+
+  // 🧠 AutoRewrite C-fix: gebruik canonical fields + aliases
+  const autoRewrite =
+    expression && knownFields.length
+      ? autoRewriteExpression(expression, knownFields)
+      : null;
 
   const unknownFields = referencedFields.filter(
-    (f) => typeof f.value === 'undefined'
+    (f) => typeof f.value === 'undefined',
   );
 
   const unknownWithSuggestions = unknownFields.map((f) => {
@@ -60,6 +118,7 @@ export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
 
   const statusLabel =
     result === true ? 'TRUE' : result === false ? 'FALSE' : 'ERROR';
+
   const statusColorClasses =
     result === true
       ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -151,12 +210,12 @@ export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
               </span>
             )}
             {isShortCircuited && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 text-[10px]">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200">
                 Short-circuited
               </span>
             )}
             {isError && node.error && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200 text-[10px]">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-amber-800 bg-amber-50 border border-amber-200">
                 {node.error}
               </span>
             )}
@@ -211,7 +270,7 @@ export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
 
       {/* Body */}
       <div className="flex-1 overflow-auto p-4 space-y-4 text-xs text-slate-700">
-        {/* Expression */}
+        {/* Rule expression */}
         <div>
           <div className="text-[10px] uppercase tracking-[0.16em] text-slate-400 mb-1">
             Rule expression
@@ -220,6 +279,59 @@ export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
             {expression}
           </div>
         </div>
+
+        {/* 🔧 Auto-fix suggestion (C-fix) */}
+        {autoRewrite && autoRewrite.rewritten !== autoRewrite.original && (
+          <div className="mt-2 border border-emerald-200 bg-emerald-50 rounded-xl p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-[0.16em] text-emerald-700">
+                Auto-fix suggestion
+              </div>
+              {onApplyRewrite && (
+                <button
+                  type="button"
+                  onClick={() => onApplyRewrite(autoRewrite.rewritten)}
+                  className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Apply auto-fix
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] font-mono">
+              <div>
+                <div className="text-[10px] uppercase text-slate-500 mb-0.5">
+                  Original
+                </div>
+                <div className="bg-white border border-slate-200 rounded-lg px-2 py-1 overflow-x-auto line-through decoration-rose-500">
+                  {autoRewrite.original}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase text-slate-500 mb-0.5">
+                  Rewritten
+                </div>
+                <div className="bg-white border border-emerald-200 rounded-lg px-2 py-1 overflow-x-auto">
+                  {autoRewrite.rewritten}
+                </div>
+              </div>
+            </div>
+
+            {autoRewrite.changes.length > 0 && (
+              <div className="text-[10px] text-slate-600">
+                {autoRewrite.changes.map((c, idx) => (
+                  <div key={idx}>
+                    <span className="font-mono">{c.from}</span> →{' '}
+                    <span className="font-mono">{c.to}</span>{' '}
+                    <span className="opacity-70">
+                      ({Math.round(c.score * 100)}% match)
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Expression with values */}
         {expressionWithValues && (
@@ -269,7 +381,10 @@ export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
                 </thead>
                 <tbody>
                   {referencedFields.map((f, idx) => (
-                    <tr key={idx} className="border-b border-slate-100 last:border-b-0">
+                    <tr
+                      key={idx}
+                      className="border-b border-slate-100 last:border-b-0"
+                    >
                       <td className="px-3 py-1.5 font-mono text-slate-700">
                         {f.path}
                       </td>
@@ -303,8 +418,7 @@ export const ConditionDebuggerPanel: React.FC<ConditionDebuggerPanelProps> = ({
                     <span className="font-mono font-semibold">
                       {f.path}
                     </span>{' '}
-                    (value is{' '}
-                    <span className="font-mono">undefined</span>).
+                    (value is <span className="font-mono">undefined</span>).
                   </div>
                   {f.suggestion ? (
                     <div className="mt-0.5">
