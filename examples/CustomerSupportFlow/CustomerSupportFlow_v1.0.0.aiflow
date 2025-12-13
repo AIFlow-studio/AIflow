@@ -13,30 +13,32 @@
       "agent2",
       "agent3"
     ],
-    "variables": {
-      "language": "nl",
-      "timezone": "Europe/Amsterdam"
-    },
+"variables": {
+  "language": "nl",
+  "timezone": "Europe/Amsterdam",
+  "ticket_text": "Ik kan niet inloggen sinds vanochtend. Krijg error 500 op /login."
+},
+
     "logic": [
       {
         "id": "rule1",
         "from": "agent1",
         "to": "agent2",
-        "condition": "ticket_type == 'technical'",
+        "condition": "output.ticket_type == 'technical'",
         "description": "Route technical issues to the solution finder."
       },
       {
         "id": "rule2",
         "from": "agent1",
         "to": "agent3",
-        "condition": "ticket_type == 'billing'",
+        "condition": "output.ticket_type == 'billing'",
         "description": "Route billing issues to the general responder."
       },
       {
         "id": "rule3",
         "from": "agent2",
         "to": "agent3",
-        "condition": "solution_found == true",
+        "condition": "output.solution_found == true",
         "description": "Draft response after solution is found."
       }
     ],
