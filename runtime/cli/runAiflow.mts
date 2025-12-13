@@ -28,6 +28,49 @@ export function tryParseJson(text: string): any {
   }
 }
 
+// ✅ Safe snapshot helper (truthful inputContext, voorkomt mutation-leaks)
+function cloneJsonSafe<T>(obj: T): T {
+  try {
+    return JSON.parse(JSON.stringify(obj));
+  } catch {
+    // Fallback: shallow copy (liever dit dan crashen)
+    if (obj && typeof obj === "object") return { ...(obj as any) };
+    return obj;
+  }
+}
+
+// ✅ Retry helpers (A: retries als sub-attempts binnen dezelfde agent step)
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableLLMError(err: any): boolean {
+  const msg = String(err?.message ?? err ?? "");
+  const code = String(err?.code ?? "");
+  const status = String(err?.status ?? err?.response?.status ?? "");
+
+  // Rate limit / quota / transient
+  if (status === "429" || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED"))
+    return true;
+  if (status === "503" || msg.includes("503") || msg.includes("UNAVAILABLE"))
+    return true;
+  if (msg.toLowerCase().includes("timeout")) return true;
+  if (msg.toLowerCase().includes("fetch failed")) return true;
+  if (code.toLowerCase().includes("etimedout") || code.toLowerCase().includes("econnreset"))
+    return true;
+
+  return false;
+}
+
+function backoffMs(attempt: number) {
+  // attempt: 1,2,3...
+  const base = Number(process.env.AIFLOW_LLM_RETRY_BASE_MS ?? "500"); // 500ms default
+  const cap = Number(process.env.AIFLOW_LLM_RETRY_CAP_MS ?? "5000"); // 5s cap
+  const exp = Math.min(cap, base * Math.pow(2, attempt - 1));
+  const jitter = Math.floor(Math.random() * 150); // small jitter
+  return exp + jitter;
+}
+
 // Haal API-key uit env (CLI-omgeving)
 // In MOCK_LLM-mode gebruiken we geen echte calls, maar laten we de check staan
 const API_KEY = process.env.API_KEY || process.env.GEMINI_API_KEY;
@@ -46,26 +89,26 @@ function getMockOutput(agentId: string, context: Record<string, any>): any {
     case "triage":
       return {
         needs_human: false,
-        category: "mock_category"
+        category: "mock_category",
       };
     case "automated_resolution":
       return {
         resolved: true,
-        message: "Mock automated resolution successful."
+        message: "Mock automated resolution successful.",
       };
 
     // LeadQualificationFlow
     case "agent_qualifier":
       return {
         fit_score: 80,
-        reason: "Mock: fits ICP."
+        reason: "Mock: fits ICP.",
       };
 
     // MarketingContentFlow
     case "agent_strategist":
       return {
         approved: true,
-        strategy: "Mock strategy plan"
+        strategy: "Mock strategy plan",
       };
     case "agent_social":
       return {
@@ -73,8 +116,8 @@ function getMockOutput(agentId: string, context: Record<string, any>): any {
           { channel: "twitter", text: "Mock tweet 1" },
           { channel: "twitter", text: "Mock tweet 2" },
           { channel: "twitter", text: "Mock tweet 3" },
-          { channel: "linkedin", text: "Mock LinkedIn post" }
-        ]
+          { channel: "linkedin", text: "Mock LinkedIn post" },
+        ],
       };
 
     // Default: géén volledige contextSnapshot meer → voorkomt circular refs
@@ -82,7 +125,7 @@ function getMockOutput(agentId: string, context: Record<string, any>): any {
       return {
         mock: true,
         agentId,
-        note: "Default mock output."
+        note: "Default mock output.",
       };
   }
 }
@@ -90,9 +133,7 @@ function getMockOutput(agentId: string, context: Record<string, any>): any {
 async function run() {
   const fileArg = process.argv[2];
   if (!fileArg) {
-    console.error(
-      "Usage: node runtime/cli/runAiflow.mts <path-to-file.aiflow>"
-    );
+    console.error("Usage: node runtime/cli/runAiflow.mts <path-to-file.aiflow>");
     process.exit(1);
   }
 
@@ -134,31 +175,30 @@ async function run() {
     null;
 
   // In de huidige spec is agents een ARRAY
-  const agentsArray: any[] = Array.isArray(project.agents)
-    ? project.agents
-    : [];
+  const agentsArray: any[] = Array.isArray(project.agents) ? project.agents : [];
 
   const logicRules: any[] = Array.isArray(project.flow?.logic)
     ? project.flow.logic
     : [];
+
   const toolsRegistry: Record<string, any> = project.tools || {};
 
   let steps = 0;
   const MAX_STEPS = 10;
 
   while (currentAgentId && steps < MAX_STEPS) {
-    const agent =
-      agentsArray.find((a) => a && a.id === currentAgentId) ??
-      null;
+    const agent = agentsArray.find((a) => a && a.id === currentAgentId) ?? null;
 
     if (!agent) {
       console.error(`❌ Agent '${currentAgentId}' not found`);
       break;
     }
 
-    console.log(
-      `\n=== Agent: ${agent.name ?? currentAgentId} (${agent.role}) ===`
-    );
+    console.log(`\n=== Agent: ${agent.name ?? currentAgentId} (${agent.role}) ===`);
+
+    // ✅ Snapshot BEFORE this step runs (truthful inputContext)
+    const inputContextSnapshot = cloneJsonSafe(context);
+    const startedAt = Date.now();
 
     const prompts = project.prompts || {};
     const promptTemplate =
@@ -183,24 +223,96 @@ Respond in ${agent.output_format || "text"}.
     let rawOutput: string;
     let parsed: any;
 
+    // Retry metadata (sub-attempts binnen dezelfde agent step)
+    const maxAttempts = Math.max(
+      1,
+      Number(process.env.AIFLOW_LLM_MAX_ATTEMPTS ?? "2") // default: 2 attempts
+    );
+
+    const attempts: Array<{
+      attempt: number;
+      status: "success" | "error";
+      model?: string;
+      error?: { message: string; code?: string; status?: string };
+      rawOutput?: string;
+    }> = [];
+
+    let status: "success" | "error" = "success";
+    let lastErr: any = null;
+
     if (MOCK_LLM) {
       // 🧪 Geen echte call: gebruik mock output
       const mock = getMockOutput(currentAgentId, context);
       rawOutput = "```json\n" + JSON.stringify(mock, null, 2) + "\n```";
       parsed = mock;
+      attempts.push({ attempt: 1, status: "success", model: "mock", rawOutput });
       console.log("\n[MOCK MODE] Skipping real LLM call.");
     } else {
-      // 🌐 Echte Gemini-call
+      // 🌐 Echte Gemini-call (met retries)
       const modelName = "gemini-2.5-flash";
 
-      const response = await ai!.models.generateContent({
-        model: modelName,
-        contents: fullPrompt,
-      });
+      rawOutput = "";
+      parsed = null;
 
-      rawOutput = (response as any).text ?? "";
-      parsed = tryParseJson(rawOutput);
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  try {
+    // 🔧 Local deterministic retry test (do NOT push)
+    // If AIFLOW_FORCE_FIRST_ATTEMPT_FAIL=1, we throw once on attempt 1 per agent step.
+    if (attempt === 1 && process.env.AIFLOW_FORCE_FIRST_ATTEMPT_FAIL === "1") {
+      throw Object.assign(new Error("FORCED_RETRY_TEST: simulated transient error"), {
+        status: 429,
+      });
     }
+
+    const response = await ai!.models.generateContent({
+      model: modelName,
+      contents: fullPrompt,
+    });
+
+
+          rawOutput = (response as any).text ?? "";
+          parsed = tryParseJson(rawOutput);
+
+          attempts.push({ attempt, status: "success", model: modelName, rawOutput });
+          status = "success";
+          lastErr = null;
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          status = "error";
+
+          const msg = String(err?.message ?? err ?? "Unknown error");
+          const code = String(err?.code ?? "");
+          const st = String(err?.status ?? err?.response?.status ?? "");
+
+          attempts.push({
+            attempt,
+            status: "error",
+            model: modelName,
+            error: { message: msg, code: code || undefined, status: st || undefined },
+          });
+
+          const retryable = isRetryableLLMError(err);
+          const hasMoreAttempts = attempt < maxAttempts;
+
+          if (!retryable || !hasMoreAttempts) {
+            // Final failure: keep rawOutput as structured JSON string for visibility
+            rawOutput = `{"__error":"LLM_CALL_FAILED","message":${JSON.stringify(
+              msg
+            )},"code":${JSON.stringify(code || null)},"status":${JSON.stringify(
+              st || null
+            )}}`;
+            parsed = tryParseJson(rawOutput);
+            break;
+          }
+
+          // backoff then retry
+          await sleep(backoffMs(attempt));
+        }
+      }
+    }
+
+    const finishedAt = Date.now();
 
     console.log("\nRaw Output:\n" + rawOutput);
     console.log("\nParsed Output:", parsed);
@@ -239,9 +351,7 @@ Respond in ${agent.output_format || "text"}.
     }
 
     // ✅ v0.2 Expression-based routing met nieuwe condition engine
-    const rulesForAgent = logicRules.filter(
-      (rule) => rule.from === currentAgentId
-    );
+    const rulesForAgent = logicRules.filter((rule) => rule.from === currentAgentId);
 
     const ruleResults: {
       id: string | null;
@@ -258,13 +368,12 @@ Respond in ${agent.output_format || "text"}.
       context,
       output: parsed,
       agentId: currentAgentId,
-      user: context.user,
+      user: (context as any).user,
     };
 
     for (const rule of rulesForAgent) {
       const conditionStr: string =
-        typeof rule.condition === "string" &&
-        rule.condition.trim().length > 0
+        typeof rule.condition === "string" && rule.condition.trim().length > 0
           ? rule.condition
           : "always";
 
@@ -283,13 +392,30 @@ Respond in ${agent.output_format || "text"}.
       }
     }
 
-    // ✅ Trace entry maken voor deze stap (incl. tools)
+    // ✅ Trace entry maken voor deze stap (incl. tools + retries metadata)
     trace.push({
       step: steps,
       agentId: currentAgentId,
       agentName: agent.name ?? currentAgentId,
       role: agent.role,
-      inputContext: { ...context },
+      inputContext: inputContextSnapshot, // ✅ truthful pre-step snapshot
+      startedAt,
+      finishedAt,
+      status, // "success" | "error"
+      attemptCount: attempts.length,
+      attempts,
+      error:
+        status === "error"
+          ? {
+              message: String(lastErr?.message ?? lastErr ?? "Unknown error"),
+              code: lastErr?.code ? String(lastErr.code) : undefined,
+              status: lastErr?.status
+                ? String(lastErr.status)
+                : lastErr?.response?.status
+                ? String(lastErr.response.status)
+                : undefined,
+            }
+          : null,
       rawOutput,
       parsedOutput: parsed,
       tools: toolResults,
