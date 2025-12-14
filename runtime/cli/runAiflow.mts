@@ -123,18 +123,22 @@ export function classifyLLMErrorV2(err: any): { errorClass: ErrorClass; errorCod
   }
 
   // rate limit / quota
+  // transient
 if (status === "429" || msg.includes("429") || msg.includes("resource_exhausted")) {
-  // Daily quota exceeded is NOT meaningfully retryable (waiting doesn't help)
+  // Daily quota exhausted is NOT meaningfully retryable → treat as hard stop
   if (
     msg.includes("requests per day") ||
     msg.includes("quota exceeded for metric") ||
-    msg.includes("perday") ||
-    msg.includes("generaterequestsperday")
+    msg.includes("generaterequestsperday") ||
+    msg.includes("generativelanguage.googleapis.com/generate_content_free_tier_requests")
   ) {
     return { errorClass: "hard", errorCode: "rate_limit" };
   }
+
+  // burst/normal rate limit → retryable
   return { errorClass: "transient", errorCode: "rate_limit" };
 }
+
 
 
   // timeout
