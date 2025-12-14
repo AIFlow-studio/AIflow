@@ -2,56 +2,46 @@
   "metadata": {
     "name": "CustomerSupportFlow",
     "version": "1.0.0",
-    "description": "Multi-agent workflow for automated level 1 customer support.",
+    "description": "AIFLOW project for customer support ticket triage and resolution.",
     "creator": "Marcel Spaan"
   },
   "flow": {
-    "schema_version": "1.0",
     "entry_agent": "agent1",
-    "agents": [
-      "agent1",
-      "agent2",
-      "agent3"
-    ],
-"variables": {
-  "language": "nl",
-  "timezone": "Europe/Amsterdam",
-  "ticket_text": "Ik kan niet inloggen sinds vanochtend. Krijg error 500 op /login."
-},
-
+    "variables": {
+      "language": "nl",
+      "timezone": "Europe/Amsterdam",
+      "ticket_text": "Ik kan niet inloggen sinds vanochtend. Krijg error 500 op /login."
+    },
     "logic": [
       {
         "id": "rule1",
         "from": "agent1",
         "to": "agent2",
-        "condition": "output.ticket_type == 'technical'",
-        "description": "Route technical issues to the solution finder."
+        "condition": "output.ticket_type == 'technical'"
       },
       {
         "id": "rule2",
         "from": "agent1",
         "to": "agent3",
-        "condition": "output.ticket_type == 'billing'",
-        "description": "Route billing issues to the general responder."
+        "condition": "output.ticket_type == 'billing'"
       },
       {
         "id": "rule3",
         "from": "agent2",
         "to": "agent3",
-        "condition": "output.solution_found == true",
-        "description": "Draft response after solution is found."
+        "condition": "output.solution_found == true"
       }
-    ],
-    "error_handling": {
-      "retry": 2,
-      "fallback_agent": "agent3"
-    }
+    ]
   },
   "agents": [
     {
       "id": "agent1",
       "name": "TriageBot",
       "role": "Classifier",
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "retryOn": ["transient"]
+      },
       "model": {
         "provider": "openai",
         "name": "gpt-4.2-mini",
@@ -69,6 +59,10 @@
       "id": "agent2",
       "name": "TechSolver",
       "role": "Engineer",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "retryOn": ["transient"]
+      },
       "model": {
         "provider": "openai",
         "name": "gpt-4-turbo",
@@ -77,59 +71,45 @@
       },
       "prompt": "system_tech.txt",
       "instructions": "instructions_tech.md",
-      "tools": [
-        "web_search",
-        "stack_overflow_api"
-      ],
-      "memory": "memory/vector.json",
+      "tools": ["web_search", "stack_overflow_api"],
+      "memory": "memory/schema.json",
       "output_format": "json",
       "executionStatus": "idle"
     },
     {
       "id": "agent3",
-      "name": "Responder",
-      "role": "Copywriter",
+      "name": "BillingSpecialist",
+      "role": "Billing",
       "model": {
-        "provider": "anthropic",
-        "name": "claude-3-5-sonnet",
-        "temperature": 0.7,
-        "max_tokens": 1000
+        "provider": "openai",
+        "name": "gpt-4.2-mini",
+        "temperature": 0.2,
+        "max_tokens": 1200
       },
-      "prompt": "system_responder.txt",
-      "instructions": "guidelines_tone.md",
+      "prompt": "system_billing.txt",
+      "instructions": "instructions_billing.md",
       "tools": [],
       "memory": "memory/schema.json",
-      "output_format": "text",
+      "output_format": "json",
       "executionStatus": "idle"
     }
   ],
-  "tools": {
-    "web_search": {
-      "type": "http",
-      "endpoint": "https://api.search.com/v1",
-      "method": "GET",
-      "description": "Search the web for documentation."
-    },
-    "stack_overflow_api": {
-      "type": "http",
-      "endpoint": "https://api.stackoverflow.com/v1/search",
-      "method": "GET",
-      "description": "Search StackOverflow for relevant technical answers."
-    },
-    "calculator": {
-      "type": "builtin",
-      "operations": [
-        "add",
-        "subtract",
-        "multiply",
-        "divide"
-      ],
-      "description": "Basic arithmetic operations."
-    }
-  },
   "prompts": {
-    "system_triage.txt": "You are a classifier. Analyze the incoming ticket and output JSON with 'ticket_type' (technical|billing|general).",
-    "system_tech.txt": "You are a senior support engineer. Use tools to find solutions to the technical problem described.",
-    "system_responder.txt": "You are a polite customer service agent. Draft a friendly email based on the provided solution."
+    "system_triage.txt": "You are a triage agent. Classify the ticket into: technical or billing. Respond in JSON with {\"ticket_type\": \"...\"}.",
+    "system_tech.txt": "You are a technical support engineer. Diagnose and propose steps. Respond in JSON.",
+    "system_billing.txt": "You are a billing support specialist. Respond in JSON."
+  },
+"tools": {
+  "web_search": {
+    "type": "http",
+    "base_url": "https://example.invalid",
+    "endpoint": "/web_search"
+  },
+  "stack_overflow_api": {
+    "type": "http",
+    "base_url": "https://api.stackexchange.com",
+    "endpoint": "/2.3/search/advanced"
   }
+}
+
 }
