@@ -52,6 +52,12 @@
       "id": "agent1",
       "name": "TriageBot",
       "role": "Classifier",
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "retryOn": [
+          "transient"
+        ]
+      },
       "model": {
         "provider": "openai",
         "name": "gpt-4.2-mini",
@@ -69,6 +75,12 @@
       "id": "agent2",
       "name": "TechSolver",
       "role": "Engineer",
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "retryOn": [
+          "transient"
+        ]
+      },
       "model": {
         "provider": "openai",
         "name": "gpt-4-turbo",

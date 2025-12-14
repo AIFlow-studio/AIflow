@@ -44,6 +44,31 @@ function cloneJsonSafe<T>(obj: T): T {
 // -----------------------------
 type ErrorClass = "transient" | "hard" | "unknown";
 
+type RetryPolicy = {
+  maxAttempts?: number;
+  // v1: policy spreekt in errorClass-termen (geen status codes)
+  retryOn?: Array<ErrorClass>;
+};
+
+function resolveRetryPolicy(agent: any): { maxAttempts: number; retryOn: Array<ErrorClass> } {
+  // global default blijft env-based (backwards compatible)
+  const envMax = Number(process.env.AIFLOW_LLM_MAX_ATTEMPTS ?? "2");
+  const agentMaxRaw = agent?.retryPolicy?.maxAttempts;
+
+  const agentMax = Number(agentMaxRaw);
+  const maxAttempts = Math.max(
+    1,
+    Number.isFinite(agentMax) ? agentMax : Number.isFinite(envMax) ? envMax : 2
+  );
+
+  const retryOnRaw = agent?.retryPolicy?.retryOn;
+  const retryOn: Array<ErrorClass> = Array.isArray(retryOnRaw)
+    ? retryOnRaw.filter((x: any) => x === "transient" || x === "hard" || x === "unknown")
+    : ["transient"]; // default policy: retry only transient
+
+  return { maxAttempts, retryOn };
+}
+
 // v1: deterministic — no real waiting/jitter yet
 function backoffMs(_attempt: number) {
   return 0;
@@ -68,21 +93,24 @@ function classifyLLMError(err: any): ErrorClass {
   return "unknown";
 }
 
-function shouldRetryFromClass(params: {
+function shouldRetryFromPolicy(params: {
   errorClass: ErrorClass;
   attempt: number;
   maxAttempts: number;
+  retryOn: Array<ErrorClass>;
 }): { shouldRetry: boolean; retryReason: string } {
-  const { errorClass, attempt, maxAttempts } = params;
+  const { errorClass, attempt, maxAttempts, retryOn } = params;
 
   const hasMoreAttempts = attempt < maxAttempts;
   if (!hasMoreAttempts) return { shouldRetry: false, retryReason: "max_attempts_reached" };
 
-  if (errorClass === "transient") return { shouldRetry: true, retryReason: "transient_error" };
+  // hard errors: never retry (policy cannot override this in v1)
   if (errorClass === "hard") return { shouldRetry: false, retryReason: "hard_error" };
 
-  // unknown: conservative default = no retry (can relax later)
-  return { shouldRetry: false, retryReason: "unknown_error_no_retry" };
+  const allowed = retryOn.includes(errorClass);
+
+  if (allowed) return { shouldRetry: true, retryReason: `policy_retry_${errorClass}` };
+  return { shouldRetry: false, retryReason: `policy_no_retry_${errorClass}` };
 }
 
 // Haal API-key uit env (CLI-omgeving)
@@ -234,7 +262,9 @@ Respond in ${agent.output_format || "text"}.
     let parsed: any;
 
     // Retry metadata (sub-attempts binnen dezelfde agent step)
-    const maxAttempts = Math.max(1, Number(process.env.AIFLOW_LLM_MAX_ATTEMPTS ?? "2"));
+    const resolvedRetryPolicy = resolveRetryPolicy(agent);
+    const maxAttempts = resolvedRetryPolicy.maxAttempts;
+    const retryOn = resolvedRetryPolicy.retryOn;
 
     const attempts: Array<{
       attempt: number;
@@ -314,7 +344,7 @@ Respond in ${agent.output_format || "text"}.
           const st = String(err?.status ?? err?.response?.status ?? "");
 
           const errorClass = classifyLLMError(err);
-          const decision = shouldRetryFromClass({ errorClass, attempt, maxAttempts });
+          const decision = shouldRetryFromPolicy({ errorClass, attempt, maxAttempts, retryOn });
           const backoffAppliedMs = decision.shouldRetry ? backoffMs(attempt) : 0;
 
           attempts.push({
@@ -428,6 +458,7 @@ Respond in ${agent.output_format || "text"}.
       status, // "success" | "error"
       attemptCount: attempts.length,
       attempts,
+      retryPolicy: resolvedRetryPolicy,
       error:
         status === "error"
           ? {
