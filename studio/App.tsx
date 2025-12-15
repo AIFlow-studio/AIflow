@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import studioMetadata from './metadata.json';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import WorkflowGraph from './components/WorkflowGraph';
@@ -37,10 +38,38 @@ type TemplateKey = 'customer_support' | 'lead_qualification' | 'marketing_conten
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
   
+
+  // --- Stable Project Session IDs (persisted) ---
+  // Keeps a stable session id per project name, so reloads keep the same session identity.
+  // Intentionally minimal: no autosave/restore, only stable IDs.
+  const getStableSessionId = (projectName: string) => {
+    try {
+      const key = `aiflow.session.${encodeURIComponent(projectName)}`;
+      const existing = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
+      if (existing) return existing;
+
+      const uuid =
+        (globalThis.crypto && 'randomUUID' in globalThis.crypto)
+          ? (globalThis.crypto as Crypto).randomUUID()
+          : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+      const id = `${projectName}_${uuid}`;
+      if (typeof window !== 'undefined') window.localStorage.setItem(key, id);
+      return id;
+    } catch {
+      // If localStorage is unavailable (private mode / disabled), fall back to unique-per-load.
+      const uuid =
+        (globalThis.crypto && 'randomUUID' in globalThis.crypto)
+          ? (globalThis.crypto as Crypto).randomUUID()
+          : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+      return `${projectName}_${uuid}`;
+    }
+  };
+
   // State
   const [sessions, setSessions] = useState<ProjectSession[]>([
-      { id: INITIAL_PROJECT.metadata.name, history: [INITIAL_PROJECT], historyIndex: 0, lastModified: new Date() },
-      { id: MARKETING_PROJECT.metadata.name, history: [MARKETING_PROJECT], historyIndex: 0, lastModified: new Date(Date.now() - 86400000) }
+      { id: getStableSessionId(INITIAL_PROJECT.metadata.name), history: [INITIAL_PROJECT], historyIndex: 0, lastModified: new Date() },
+      { id: getStableSessionId(MARKETING_PROJECT.metadata.name), history: [MARKETING_PROJECT], historyIndex: 0, lastModified: new Date(Date.now() - 86400000) }
   ]);
   const [activeSessionId, setActiveSessionId] = useState<string>(INITIAL_PROJECT.metadata.name);
   const [globalApiKey, setGlobalApiKey] = useState("");
@@ -53,21 +82,29 @@ const App: React.FC = () => {
   const [runInputs, setRunInputs] = useState<Record<string, string>>({});
   const runnerRef = useRef<WorkflowRunner | null>(null);
 
+  // --- Simulation Mode (behind flag) ---
+  const ENABLE_SIM_MODE = Boolean((studioMetadata as any)?.features?.simulationMode) ||
+    (typeof window !== 'undefined' && window.localStorage.getItem('aiflow.sim_ui') === '1');
+  type RunMode = 'real' | 'sim';
+  const defaultRunMode = (studioMetadata as any)?.features?.simulationModeDefault === 'sim' ? 'sim' : 'real';
+  const [runMode, setRunMode] = useState<RunMode>(defaultRunMode);
+  const [simSeed, setSimSeed] = useState<number>(42);
+
   // Dirty State (Unsaved Changes)
   const [isDirty, setIsDirty] = useState(false);
 
   // UI State
-const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-const [selectedConditionTrace, setSelectedConditionTrace] = useState<any | null>(null);
-const [selectedLogicLinkId, setSelectedLogicLinkId] = useState<string | null>(null);
-const [editingLink, setEditingLink] = useState<{id: string, condition: string, mapping?: string} | null>(null);
-const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
-const [highlightedEdges, setHighlightedEdges] = useState<{ from: string; to: string }[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedConditionTrace, setSelectedConditionTrace] = useState<any | null>(null);
+  const [selectedLogicLinkId, setSelectedLogicLinkId] = useState<string | null>(null);
+  const [editingLink, setEditingLink] = useState<{id: string, condition: string, mapping?: string} | null>(null);
+  const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([]);
+  const [highlightedEdges, setHighlightedEdges] = useState<{ from: string; to: string }[]>([]);
 
-// NEW: Edge status (ok | autofix | error)
-const [edgeStatusByLinkId, setEdgeStatusByLinkId] = useState<
-  Record<string, 'ok' | 'autofix' | 'error'>
->({});
+  // NEW: Edge status (ok | autofix | error)
+  const [edgeStatusByLinkId, setEdgeStatusByLinkId] = useState<
+    Record<string, 'ok' | 'autofix' | 'error'>
+  >({});
 
   const [isLinkingMode, setIsLinkingMode] = useState(false);
   const [linkingSourceId, setLinkingSourceId] = useState<string | null>(null);
@@ -96,7 +133,7 @@ const [edgeStatusByLinkId, setEdgeStatusByLinkId] = useState<
   const project = activeSession.history[activeSession.historyIndex];
   const historyIndex = activeSession.historyIndex;
 
-    // Selected logic link (edge) for Rule Inspector
+  // Selected logic link (edge) for Rule Inspector
   const selectedLogicLink = useMemo(() => {
     if (!selectedLogicLinkId) return null;
     return (project.flow.logic as any[]).find((l) => l.id === selectedLogicLinkId) ?? null;
@@ -113,33 +150,30 @@ const [edgeStatusByLinkId, setEdgeStatusByLinkId] = useState<
   }, [project.agents, selectedLogicLink]);
 
   // ✅ Map validator issues → per-agent error/warning counts
-const validationByAgentId = useMemo(() => {
-  const map: Record<string, { errors: number; warnings: number }> = {};
+  const validationByAgentId = useMemo(() => {
+    const map: Record<string, { errors: number; warnings: number }> = {};
 
-  if (!validationIssues || !Array.isArray(validationIssues)) {
+    if (!validationIssues || !Array.isArray(validationIssues)) {
+      return map;
+    }
+
+    validationIssues.forEach((issue) => {
+      if (!issue.path) return;
+
+      const agentId = issue.path[0];
+      if (!map[agentId]) {
+        map[agentId] = { errors: 0, warnings: 0 };
+      }
+
+      if (issue.level === "error") {
+        map[agentId].errors += 1;
+      } else {
+        map[agentId].warnings += 1;
+      }
+    });
+
     return map;
-  }
-
-  validationIssues.forEach((issue) => {
-    if (!issue.path) return;
-
-    const agentId = issue.path[0];
-    if (!map[agentId]) {
-      map[agentId] = { errors: 0, warnings: 0 };
-    }
-
-    if (issue.level === "error") {
-      map[agentId].errors += 1;
-    } else {
-      map[agentId].warnings += 1;
-    }
-  });
-
-  return map;
-}, [validationIssues]);
-
-
-
+  }, [validationIssues]);
 
   // Initialize run inputs from project defaults
   useEffect(() => {
@@ -202,33 +236,31 @@ const validationByAgentId = useMemo(() => {
   };
 
   const handleFocusAgentFromTrace = (agentId: string) => {
-  setHighlightedNodeIds([agentId]);
-  setHighlightedEdges([]);
-  // ✅ bewust NIET: setCurrentView(...)
-  // We blijven in Debug view, alleen graph state wordt voorbereid.
-};
+    setHighlightedNodeIds([agentId]);
+    setHighlightedEdges([]);
+    // ✅ bewust NIET: setCurrentView(...)
+    // We blijven in Debug view, alleen graph state wordt voorbereid.
+  };
 
+  const handleHighlightPathFromTrace = (
+    nodes: string[],
+    edges: { from: string; to: string }[]
+  ) => {
+    setHighlightedNodeIds(nodes);
+    setHighlightedEdges(edges);
+    // bewust: GEEN view switch, GEEN selection
+  };
 
-const handleHighlightPathFromTrace = (
-  nodes: string[],
-  edges: { from: string; to: string }[]
-) => {
-  setHighlightedNodeIds(nodes);
-  setHighlightedEdges(edges);
-  // bewust: GEEN view switch, GEEN selection
-};
+  const handleHighlightPathAndOpenFromTrace = (
+    nodes: string[],
+    edges: { from: string; to: string }[]
+  ) => {
+    setHighlightedNodeIds(nodes);
+    setHighlightedEdges(edges);
+    setCurrentView(ViewState.WORKFLOW);
+  };
 
-const handleHighlightPathAndOpenFromTrace = (
-  nodes: string[],
-  edges: { from: string; to: string }[]
-) => {
-  setHighlightedNodeIds(nodes);
-  setHighlightedEdges(edges);
-  setCurrentView(ViewState.WORKFLOW);
-};
-
-
-    // 👉 Wanneer een edge (logic link) in de graph wordt aangeklikt
+  // 👉 Wanneer een edge (logic link) in de graph wordt aangeklikt
   const handleSelectLogicLinkFromGraph = (linkId: string) => {
     setSelectedLogicLinkId(linkId);
 
@@ -247,153 +279,151 @@ const handleHighlightPathAndOpenFromTrace = (
   };
 
   // Haal alle veldpaden op uit een genest context-object, bv.
-// { ticket: { type: "technical", priority: "high" } }
-//  -> ["ticket", "ticket.type", "ticket.priority"]
-const collectFieldPathsForContext = (obj: any, prefix = ''): string[] => {
-  if (obj == null || typeof obj !== 'object') return [];
-  const paths: string[] = [];
-
-  for (const key of Object.keys(obj)) {
-    const full = prefix ? `${prefix}.${key}` : key;
-    paths.push(full);
-    paths.push(...collectFieldPathsForContext(obj[key], full));
-  }
-
-  return paths;
-};
-
-// Bouw canonical + alias veldnamen uit een context
-const buildKnownFieldsFromContext = (context: any) => {
-  const allPaths = collectFieldPathsForContext(context);
-  const uniquePaths = Array.from(new Set(allPaths));
-
-  return uniquePaths.map((p) => {
-    const isSnakeOnly = p.includes("_") && !p.includes(".");
-    const canonical = isSnakeOnly ? p.replace(/_/g, ".") : p;
-    const last = canonical.split(".").pop()!;
-    const snake = canonical.replace(/\./g, "_");
-
-    return {
-      id: canonical,
-      path: canonical,
-      label: canonical,
-      aliases: [
-        canonical,  // ticket.type
-        snake,      // ticket_type
-        last,       // type
-        p           // original path
-      ],
-    };
-  });
-};
-
-
-// Condition Debugger – edge debugging with AutoRewrite PREPASS
-const handleDebugRuleFromLink = (link: any) => {
-  if (!link) return;
-
-  const expression = link.condition || String(link.label || "true");
-
-  // Always jump to workflow view
-  setCurrentView(ViewState.WORKFLOW);
-
-  // Select FROM agent for UI accuracy
-  const fromAgent = project.agents.find((a) => a.id === link.from);
-  if (fromAgent) {
-    setSelectedAgentId(fromAgent.id);
-  }
-
-  // 1) Build debug context (design-time auto context)
-  const context = buildAutoContextForExpression(expression);
-
-  // 2) Discover canonical field paths
-  const collectFieldPaths = (obj: any, prefix = ''): string[] => {
+  // { ticket: { type: "technical", priority: "high" } }
+  //  -> ["ticket", "ticket.type", "ticket.priority"]
+  const collectFieldPathsForContext = (obj: any, prefix = ''): string[] => {
     if (obj == null || typeof obj !== 'object') return [];
     const paths: string[] = [];
+
     for (const key of Object.keys(obj)) {
       const full = prefix ? `${prefix}.${key}` : key;
       paths.push(full);
-      paths.push(...collectFieldPaths(obj[key], full));
+      paths.push(...collectFieldPathsForContext(obj[key], full));
     }
+
     return paths;
   };
 
-  const allPaths = collectFieldPaths(context);
-  const uniquePaths = Array.from(new Set(allPaths));
+  // Bouw canonical + alias veldnamen uit een context
+  const buildKnownFieldsFromContext = (context: any) => {
+    const allPaths = collectFieldPathsForContext(context);
+    const uniquePaths = Array.from(new Set(allPaths));
 
-  const knownFields = uniquePaths.map((p) => {
-    const last = p.split('.').pop()!;
-    return {
-      id: p,
-      path: p,                     // canonical version
-      label: p,
-      aliases: [
-        p,                         // canonical
-        p.replace(/\./g, "_"),     // snake_case
-        last,                      // short field name
-      ],
+    return uniquePaths.map((p) => {
+      const isSnakeOnly = p.includes("_") && !p.includes(".");
+      const canonical = isSnakeOnly ? p.replace(/_/g, ".") : p;
+      const last = canonical.split(".").pop()!;
+      const snake = canonical.replace(/\./g, "_");
+
+      return {
+        id: canonical,
+        path: canonical,
+        label: canonical,
+        aliases: [
+          canonical,  // ticket.type
+          snake,      // ticket_type
+          last,       // type
+          p           // original path
+        ],
+      };
+    });
+  };
+
+  // Condition Debugger – edge debugging with AutoRewrite PREPASS
+  const handleDebugRuleFromLink = (link: any) => {
+    if (!link) return;
+
+    const expression = link.condition || String(link.label || "true");
+
+    // Always jump to workflow view
+    setCurrentView(ViewState.WORKFLOW);
+
+    // Select FROM agent for UI accuracy
+    const fromAgent = project.agents.find((a) => a.id === link.from);
+    if (fromAgent) {
+      setSelectedAgentId(fromAgent.id);
+    }
+
+    // 1) Build debug context (design-time auto context)
+    const context = buildAutoContextForExpression(expression);
+
+    // 2) Discover canonical field paths
+    const collectFieldPaths = (obj: any, prefix = ''): string[] => {
+      if (obj == null || typeof obj !== 'object') return [];
+      const paths: string[] = [];
+      for (const key of Object.keys(obj)) {
+        const full = prefix ? `${prefix}.${key}` : key;
+        paths.push(full);
+        paths.push(...collectFieldPaths(obj[key], full));
+      }
+      return paths;
     };
-  });
 
-  // 3) AutoRewrite PREPASS — happens BEFORE evaluation
-  try {
-    const rewrite = autoRewriteExpression(expression, knownFields);
-    if (rewrite) {
-      // Deliver rewrite result directly to debugger
-      setSelectedConditionTrace({
+    const allPaths = collectFieldPaths(context);
+    const uniquePaths = Array.from(new Set(allPaths));
+
+    const knownFields = uniquePaths.map((p) => {
+      const last = p.split('.').pop()!;
+      return {
+        id: p,
+        path: p,                     // canonical version
+        label: p,
+        aliases: [
+          p,                         // canonical
+          p.replace(/\./g, "_"),     // snake_case
+          last,                      // short field name
+        ],
+      };
+    });
+
+    // 3) AutoRewrite PREPASS — happens BEFORE evaluation
+    try {
+      const rewrite = autoRewriteExpression(expression, knownFields);
+      if (rewrite) {
+        // Deliver rewrite result directly to debugger
+        setSelectedConditionTrace({
+          conditionId: link.id || "edge",
+          runId: "design-preview",
+          expression: rewrite.original,
+          rewrittenExpression: rewrite.rewritten,
+          autoRewrite: rewrite,
+          debugContext: context,
+          result: null,
+          referencedFields: [],
+          root: {
+            id: "root",
+            type: "ERROR",
+            raw: rewrite.original,
+            value: null,
+            children: [],
+            error: "Rule contains invalid or unknown fields (AutoFix available).",
+          },
+        });
+        return; // STOP HERE — show autofix instead of parsing error
+      }
+    } catch (err) {
+      console.warn("AutoRewrite PREPASS failed:", err);
+    }
+
+    // 4) Normal ConditionEngine evaluation if no rewrite
+    let trace: any;
+    try {
+      trace = evaluateConditionWithTrace(expression, context);
+    } catch (err: any) {
+      trace = {
         conditionId: link.id || "edge",
         runId: "design-preview",
-        expression: rewrite.original,
-        rewrittenExpression: rewrite.rewritten,
-        autoRewrite: rewrite,
-        debugContext: context,
+        expression,
+        expressionWithValues: expression,
         result: null,
         referencedFields: [],
         root: {
           id: "root",
           type: "ERROR",
-          raw: rewrite.original,
+          raw: expression,
           value: null,
           children: [],
-          error: "Rule contains invalid or unknown fields (AutoFix available).",
+          error: err?.message || "Failed to evaluate condition",
         },
-      });
-      return; // STOP HERE — show autofix instead of parsing error
+      };
     }
-  } catch (err) {
-    console.warn("AutoRewrite PREPASS failed:", err);
-  }
 
-  // 4) Normal ConditionEngine evaluation if no rewrite
-  let trace: any;
-  try {
-    trace = evaluateConditionWithTrace(expression, context);
-  } catch (err: any) {
-    trace = {
-      conditionId: link.id || "edge",
-      runId: "design-preview",
-      expression,
-      expressionWithValues: expression,
-      result: null,
-      referencedFields: [],
-      root: {
-        id: "root",
-        type: "ERROR",
-        raw: expression,
-        value: null,
-        children: [],
-        error: err?.message || "Failed to evaluate condition",
-      },
-    };
-  }
-
-  // Add debug context regardless
-  setSelectedConditionTrace({
-    ...trace,
-    debugContext: context,
-  });
-};
-
+    // Add debug context regardless
+    setSelectedConditionTrace({
+      ...trace,
+      debugContext: context,
+    });
+  };
 
   // 👉 Auto-fix uit Condition Debugger toepassen op de echte rule
   const handleApplyRuleRewrite = (rewrittenExpression: string) => {
@@ -429,10 +459,7 @@ const handleDebugRuleFromLink = (link: any) => {
     });
   };
 
-
   // --- Helpers ---
-
-
   const updateProject = (newProject: AIFlowProject, transient = false) => {
     setSessions(prev => prev.map(s => {
         if (s.id === activeSessionId) {
@@ -508,7 +535,7 @@ const handleDebugRuleFromLink = (link: any) => {
                   throw new Error("Invalid .aiflow file structure");
               }
 
-              const loadedSessionId = loadedProject.metadata.name + "_" + Date.now();
+              const loadedSessionId = getStableSessionId(loadedProject.metadata.name);
               const newSession: ProjectSession = {
                   id: loadedSessionId,
                   history: [loadedProject],
@@ -533,6 +560,10 @@ const handleDebugRuleFromLink = (link: any) => {
 
   // --- Run Actions ---
   const handleRunClick = () => {
+      // reset modal defaults each open (optional)
+      if (!ENABLE_SIM_MODE) {
+        setRunMode('real');
+      }
       setRunModalOpen(true);
   };
 
@@ -545,13 +576,18 @@ const handleDebugRuleFromLink = (link: any) => {
       updateProject({ ...project, agents: resetAgents }, true);
 
       setIsRunning(true);
-      
-      runnerRef.current = new WorkflowRunner(
+
+      // ✅ runtime key: only required in real mode
+      const effectiveApiKey = runMode === 'sim' ? '' : globalApiKey;
+
+      // NOTE: We pass run options as a 6th arg via `as any` so this compiles
+      // even before WorkflowRunner is updated to accept options.
+      runnerRef.current = new (WorkflowRunner as any)(
           project,
-          globalApiKey,
+          effectiveApiKey,
           runInputs,
-          (log) => setLogs(prev => [...prev, log]),
-          (agentId, status) => {
+          (log: LogEntry) => setLogs(prev => [...prev, log]),
+          (agentId: string, status: any) => {
               setSessions(prev => prev.map(s => {
                   if (s.id === activeSessionId) {
                       const curr = s.history[s.historyIndex];
@@ -562,8 +598,12 @@ const handleDebugRuleFromLink = (link: any) => {
                   }
                   return s;
               }));
+          },
+          {
+            mode: runMode,
+            seed: simSeed,
           }
-      );
+      ) as WorkflowRunner;
 
       try {
           await runnerRef.current.start();
@@ -601,7 +641,7 @@ const handleDebugRuleFromLink = (link: any) => {
       };
       
       const newSession: ProjectSession = {
-          id: name,
+          id: getStableSessionId(name),
           history: [newProject],
           historyIndex: 0,
           lastModified: new Date()
@@ -653,7 +693,7 @@ const handleDebugRuleFromLink = (link: any) => {
       version: cloned.metadata.version || '1.0.0',
     };
 
-    const sessionId = `${name.replace(/\s+/g, '_')}_${Date.now()}`;
+    const sessionId = getStableSessionId(name);
     const newSession: ProjectSession = {
       id: sessionId,
       history: [cloned],
@@ -774,46 +814,45 @@ const handleDebugRuleFromLink = (link: any) => {
       setSelectedAgentId(null);
   };
 
-        const saveCondition = () => {
-        if (!editingLink) return;
+  const saveCondition = () => {
+    if (!editingLink) return;
 
-        // 1) Mapping netjes als JSON-parsed object opslaan (of undefined)
-        let parsedMapping: any = undefined;
-        if (editingLink.mapping && editingLink.mapping.trim() !== '') {
-            try {
-            parsedMapping = JSON.parse(editingLink.mapping);
-            } catch (err) {
-            // Hier kun je later nog een nette toast of error state van maken
-            console.error('Invalid JSON in data mapping:', err);
-            alert('Data mapping is geen geldige JSON. Controleer het even.');
-            return;
-            }
-        }
+    // 1) Mapping netjes als JSON-parsed object opslaan (of undefined)
+    let parsedMapping: any = undefined;
+    if (editingLink.mapping && editingLink.mapping.trim() !== '') {
+      try {
+        parsedMapping = JSON.parse(editingLink.mapping);
+      } catch (err) {
+        console.error('Invalid JSON in data mapping:', err);
+        alert('Data mapping is geen geldige JSON. Controleer het even.');
+        return;
+      }
+    }
 
-        // 2) Condition mag ALLES zijn wat onze ConditionEngine v2 aankan
-        const updatedLogic = (project.flow.logic || []).map((l: any) => {
-            if (l.id === editingLink.id) {
-            return {
-                ...l,
-                condition: editingLink.condition, // bijv. ticket.type == 'technical'
-                mapping: parsedMapping,          // als object opgeslagen
-            };
-            }
-            return l;
-        });
-
-        // 3) Project updaten
-        updateProject({
-            ...project,
-            flow: {
-            ...project.flow,
-            logic: updatedLogic,
-            },
-        });
-
-        // 4) Modal sluiten
-        setEditingLink(null);
+    // 2) Condition mag ALLES zijn wat onze ConditionEngine v2 aankan
+    const updatedLogic = (project.flow.logic || []).map((l: any) => {
+      if (l.id === editingLink.id) {
+        return {
+          ...l,
+          condition: editingLink.condition,
+          mapping: parsedMapping,
         };
+      }
+      return l;
+    });
+
+    // 3) Project updaten
+    updateProject({
+      ...project,
+      flow: {
+        ...project.flow,
+        logic: updatedLogic,
+      },
+    });
+
+    // 4) Modal sluiten
+    setEditingLink(null);
+  };
 
   // --- Tool Templates Logic ---
   const handleApplyTemplate = (templateKey: string) => {
@@ -836,7 +875,7 @@ const handleDebugRuleFromLink = (link: any) => {
             description: "New tool description",
             operations: [],
             endpoint: newToolType === 'http' ? "https://api.example.com" : undefined
-        };
+          };
       }
       
       const newTools = { ...project.tools, [newToolName]: newTool };
@@ -907,8 +946,6 @@ const handleDebugRuleFromLink = (link: any) => {
       });
   };
 
-  
-  
   // ✅ Validation handler (handmatige knop)
   const handleValidateProject = () => {
     const issues = validateProject(project);
@@ -924,7 +961,6 @@ const handleDebugRuleFromLink = (link: any) => {
   const handleSelectValidationIssue = (issue: ValidationIssue) => {
     if (!issue.path) return;
 
-    // Paden als "agents[3].prompt", "agents[1].tools[0]" etc.
     const match = issue.path.match(/^agents\[(\d+)\]/);
     if (!match) return;
 
@@ -932,10 +968,7 @@ const handleDebugRuleFromLink = (link: any) => {
     const agent = project.agents[index];
     if (!agent) return;
 
-    // Zorg dat we in de Workflow Builder zitten
     setCurrentView(ViewState.WORKFLOW);
-
-    // Selecteer de node/agent in graph + rechterpaneel
     setSelectedAgentId(agent.id);
   };
 
@@ -946,52 +979,47 @@ const handleDebugRuleFromLink = (link: any) => {
     const timeout = setTimeout(() => {
       const issues = validateProject(project);
       setValidationIssues(issues);
-      // Panel niet forceren; alleen data updaten
     }, 400);
 
     return () => clearTimeout(timeout);
   }, [currentView, project]);
 
   // ------------------------------------------------------
-// ⭐ NEW: Compute per-edge rule status (ok | autofix | error)
-useEffect(() => {
-  if (!project?.flow?.logic) {
-    setEdgeStatusByLinkId({});
-    return;
-  }
+  // ⭐ NEW: Compute per-edge rule status (ok | autofix | error)
+  useEffect(() => {
+    if (!project?.flow?.logic) {
+      setEdgeStatusByLinkId({});
+      return;
+    }
 
-  const next: Record<string, 'ok' | 'autofix' | 'error'> = {};
+    const next: Record<string, 'ok' | 'autofix' | 'error'> = {};
 
-  for (const link of project.flow.logic) {
-    const expression = link.condition || String(link.label || 'true');
-
-    try {
-      const context = buildAutoContextForExpression(expression);
-      const knownFields = buildKnownFieldsFromContext(context);
-
-      const rewrite = autoRewriteExpression(expression, knownFields);
-      if (rewrite && rewrite.rewritten !== rewrite.original) {
-        next[link.id] = 'autofix';
-        continue;
-      }
+    for (const link of project.flow.logic) {
+      const expression = link.condition || String((link as any).label || 'true');
 
       try {
-        evaluateConditionWithTrace(expression, context);
-        next[link.id] = 'ok';
+        const context = buildAutoContextForExpression(expression);
+        const knownFields = buildKnownFieldsFromContext(context);
+
+        const rewrite = autoRewriteExpression(expression, knownFields);
+        if (rewrite && rewrite.rewritten !== rewrite.original) {
+          next[link.id] = 'autofix';
+          continue;
+        }
+
+        try {
+          evaluateConditionWithTrace(expression, context);
+          next[link.id] = 'ok';
+        } catch {
+          next[link.id] = 'error';
+        }
       } catch {
         next[link.id] = 'error';
       }
-    } catch {
-      next[link.id] = 'error';
     }
-  }
 
-  setEdgeStatusByLinkId(next);
-}, [project]);
-
-
-
-
+    setEdgeStatusByLinkId(next);
+  }, [project]);
 
   // --- Render Views ---
   const renderContent = () => {
@@ -1183,22 +1211,22 @@ useEffect(() => {
 
                         <div className="h-8 w-px bg-slate-300 mx-2"></div>
 
-                            <button
-                            className="inline-flex items-center px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 gap-2"
-                            onClick={() => {
-                                const links = project.flow.logic as any[];
-                                if (!Array.isArray(links) || links.length === 0) return;
+                        <button
+                          className="inline-flex items-center px-3 py-1.5 text-xs rounded-full border border-slate-200 text-slate-600 hover:bg-slate-50 gap-2"
+                          onClick={() => {
+                              const links = project.flow.logic as any[];
+                              if (!Array.isArray(links) || links.length === 0) return;
 
-                                const firstLink = links[0];
-                                setSelectedLogicLinkId(firstLink.id);
-                                handleDebugRuleFromLink(firstLink);
-                            }}
-                            >
-                            <span className="w-4 h-4 rounded-full border border-slate-300 flex items-center justify-center text-[9px]">
-                                ?
-                            </span>
-                            Debug first rule
-                            </button>
+                              const firstLink = links[0];
+                              setSelectedLogicLinkId(firstLink.id);
+                              handleDebugRuleFromLink(firstLink);
+                          }}
+                        >
+                          <span className="w-4 h-4 rounded-full border border-slate-300 flex items-center justify-center text-[9px]">
+                              ?
+                          </span>
+                          Debug first rule
+                        </button>
 
                         <button 
                             onClick={() => setIsLinkingMode(!isLinkingMode)}
@@ -1268,25 +1296,24 @@ useEffect(() => {
                     <div className="flex-1 flex gap-6 min-h-0">
                       <div className="flex-1">
                         <WorkflowGraph 
-                        project={project} 
-                        onSelectAgent={setSelectedAgentId}
-                        onEditCondition={(id, c) => setEditingLink({ id, condition: c })}
-                        onNavigateToPrompt={handleNavigateToPrompt}
-                        onNavigateToTools={handleNavigateToTools}
-                        isLinkingMode={isLinkingMode}
-                        linkingSourceId={linkingSourceId}
-                        onNodeClick={handleNodeClick}
-                        selectedNodeId={selectedAgentId}
-                        onLinkCreate={handleLinkCreate}
-                        highlightedNodeIds={highlightedNodeIds}
-                        highlightedEdges={highlightedEdges}
-                        validationByAgentId={validationByAgentId}
-                        // 🆕 Edge selection vanuit de graph
-                        selectedLinkId={selectedLogicLinkId}
-                        onSelectLink={handleSelectLogicLinkFromGraph}
-                        edgeStatusByLinkId={edgeStatusByLinkId}
+                          project={project} 
+                          onSelectAgent={setSelectedAgentId}
+                          onEditCondition={(id, c) => setEditingLink({ id, condition: c })}
+                          onNavigateToPrompt={handleNavigateToPrompt}
+                          onNavigateToTools={handleNavigateToTools}
+                          isLinkingMode={isLinkingMode}
+                          linkingSourceId={linkingSourceId}
+                          onNodeClick={handleNodeClick}
+                          selectedNodeId={selectedAgentId}
+                          onLinkCreate={handleLinkCreate}
+                          highlightedNodeIds={highlightedNodeIds}
+                          highlightedEdges={highlightedEdges}
+                          validationByAgentId={validationByAgentId}
+                          // 🆕 Edge selection vanuit de graph
+                          selectedLinkId={selectedLogicLinkId}
+                          onSelectLink={handleSelectLogicLinkFromGraph}
+                          edgeStatusByLinkId={edgeStatusByLinkId}
                         />
-
                       </div>
                       {selectedNode && (
                         <div className="w-1/3 min-w-[400px]">
@@ -1329,8 +1356,6 @@ useEffect(() => {
                                 <RuleInspectorPanel
                                     link={selectedLogicLink as any}
                                     onClose={() => setSelectedLogicLinkId(null)}
-
-                                    // NEW: update the rule in the project when typing or applying autofix
                                     onUpdateCondition={(newCondition: string) => {
                                         const updatedLogic = (project.flow.logic || []).map((l: any) =>
                                             l.id === selectedLogicLink?.id
@@ -1346,31 +1371,23 @@ useEffect(() => {
                                             },
                                         });
                                     }}
-
-                                    // NEW: canonical context for rewrite suggestions
                                     context={buildAutoContextForExpression(selectedLogicLink?.condition || '')}
-                                    
-                                    // Debug rule (existing)
                                     onDebugRule={() => handleDebugRuleFromLink(selectedLogicLink)}
                                 />
-
                             </div>
                         )}
 
                         {/* Condition Debugger – toont uitleg waarom TRUE/FALSE */}
-                                        {selectedConditionTrace && (
-                                        <div className="flex-1 min-h-[260px]">
-<ConditionDebuggerPanel
-    trace={selectedConditionTrace}
-    onClose={() => setSelectedConditionTrace(null)}
-    onApplyRewrite={handleApplyRuleRewrite}
-    hideAutoFix={Boolean(selectedLogicLink)} // 👈 HET BELANGRIJKE STUK
-/>
-
-
-                                        </div>
-                                        )}
-
+                        {selectedConditionTrace && (
+                          <div className="flex-1 min-h-[260px]">
+                            <ConditionDebuggerPanel
+                              trace={selectedConditionTrace}
+                              onClose={() => setSelectedConditionTrace(null)}
+                              onApplyRewrite={handleApplyRuleRewrite}
+                              hideAutoFix={Boolean(selectedLogicLink)}
+                            />
+                          </div>
+                        )}
                         </div>
                     )}
                 </div>
@@ -1548,13 +1565,12 @@ useEffect(() => {
 
       if (currentView === ViewState.DEBUG) {
         return (
-<DebugTraceView
-  onJumpToAgent={handleJumpToAgentFromTrace}
-  onHighlightPath={handleHighlightPathFromTrace}
-  onHighlightPathAndOpen={handleHighlightPathAndOpenFromTrace}
-  onFocusAgent={handleFocusAgentFromTrace}
-/>
-
+          <DebugTraceView
+            onJumpToAgent={handleJumpToAgentFromTrace}
+            onHighlightPath={handleHighlightPathFromTrace}
+            onHighlightPathAndOpen={handleHighlightPathAndOpenFromTrace}
+            onFocusAgent={handleFocusAgentFromTrace}
+          />
         );
       }
 
@@ -1703,7 +1719,52 @@ useEffect(() => {
                       <button onClick={() => setRunModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-600" /></button>
                   </div>
                   <div className="p-6 space-y-4">
-                      {!globalApiKey && (
+                      {/* SIM MODE UI (behind flag) */}
+                      {ENABLE_SIM_MODE && (
+                        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
+                          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Execution Mode</div>
+                          <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="radio"
+                                name="runMode"
+                                value="real"
+                                checked={runMode === 'real'}
+                                onChange={() => setRunMode('real')}
+                              />
+                              Real (API key required)
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="radio"
+                                name="runMode"
+                                value="sim"
+                                checked={runMode === 'sim'}
+                                onChange={() => setRunMode('sim')}
+                              />
+                              Simulation (no network)
+                            </label>
+                          </div>
+
+                          {runMode === 'sim' && (
+                            <div className="mt-3">
+                              <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Sim Seed</div>
+                              <input
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none font-mono text-sm bg-white"
+                                type="number"
+                                value={simSeed}
+                                onChange={(e) => setSimSeed(Number(e.target.value || 0))}
+                              />
+                              <p className="text-xs text-slate-500 mt-1">
+                                Deterministic: same seed ⇒ same outputs.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Warning only if REAL mode needs key */}
+                      {!globalApiKey && runMode === 'real' && (
                           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800 flex items-start">
                               <AlertTriangle size={14} className="mr-2 mt-0.5 flex-shrink-0" />
                               <p>No Global API Key found. You can enter one here for this session, or set it permanently in Settings.</p>
@@ -1716,8 +1777,11 @@ useEffect(() => {
                             type="password" 
                             value={globalApiKey} 
                             onChange={e => setGlobalApiKey(e.target.value)}
-                            placeholder="sk-..."
-                            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none font-mono text-sm"
+                            placeholder={runMode === 'sim' ? 'Not required in Simulation mode' : 'sk-...'}
+                            disabled={runMode === 'sim'}
+                            className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none font-mono text-sm ${
+                              runMode === 'sim' ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''
+                            }`}
                           />
                       </div>
 
