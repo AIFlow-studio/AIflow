@@ -5,8 +5,15 @@ import { GoogleGenAI } from "@google/genai";
 import { validateProject, hasValidationErrors } from "../core/validator.ts";
 import { evaluateExpression } from "../core/conditionEngineV2.ts";
 import { runToolsForAgent } from "../core/toolsRuntime.mts";
+import { resolveRunConfig } from "../shared/runConfig.ts";
 
-const MOCK_LLM = process.env.AIFLOW_MOCK_LLM === "1";
+const runConfig = resolveRunConfig(process.env);
+const MOCK_LLM = runConfig.mode === "sim";
+
+// Bridge for backward-compat: downstream code may still check AIFLOW_MOCK_LLM
+if (MOCK_LLM) {
+  process.env.AIFLOW_MOCK_LLM = "1";
+}
 
 // If set: disables actual sleeping (still records intended backoffAppliedMs)
 const DISABLE_SLEEP_BACKOFF = process.env.AIFLOW_DISABLE_SLEEP_BACKOFF === "1";
@@ -124,22 +131,20 @@ export function classifyLLMErrorV2(err: any): { errorClass: ErrorClass; errorCod
 
   // rate limit / quota
   // transient
-if (status === "429" || msg.includes("429") || msg.includes("resource_exhausted")) {
-  // Daily quota exhausted is NOT meaningfully retryable → treat as hard stop
-  if (
-    msg.includes("requests per day") ||
-    msg.includes("quota exceeded for metric") ||
-    msg.includes("generaterequestsperday") ||
-    msg.includes("generativelanguage.googleapis.com/generate_content_free_tier_requests")
-  ) {
-    return { errorClass: "hard", errorCode: "rate_limit" };
+  if (status === "429" || msg.includes("429") || msg.includes("resource_exhausted")) {
+    // Daily quota exhausted is NOT meaningfully retryable → treat as hard stop
+    if (
+      msg.includes("requests per day") ||
+      msg.includes("quota exceeded for metric") ||
+      msg.includes("generaterequestsperday") ||
+      msg.includes("generativelanguage.googleapis.com/generate_content_free_tier_requests")
+    ) {
+      return { errorClass: "hard", errorCode: "rate_limit" };
+    }
+
+    // burst/normal rate limit → retryable
+    return { errorClass: "transient", errorCode: "rate_limit" };
   }
-
-  // burst/normal rate limit → retryable
-  return { errorClass: "transient", errorCode: "rate_limit" };
-}
-
-
 
   // timeout
   if (msg.includes("timeout")) return { errorClass: "transient", errorCode: "timeout" };
@@ -437,7 +442,7 @@ async function runDirectiveTools(params: {
 const API_KEY = process.env.API_KEY || process.env.GEMINI_API_KEY;
 if (!API_KEY && !MOCK_LLM) {
   console.error(
-    "❌ No API key set. Please set API_KEY or GEMINI_API_KEY in your environment, or use AIFLOW_MOCK_LLM=1."
+    "❌ No API key set. Please set API_KEY or GEMINI_API_KEY in your environment, or use AIFLOW_MODE=sim (or AIFLOW_MOCK_LLM=1)."
   );
   process.exit(1);
 }
